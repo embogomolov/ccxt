@@ -5047,9 +5047,12 @@ class binance(ccxt.async_support.binance):
                 self.myTrades = ArrayCacheBySymbolById(limit)
             myTrades = self.myTrades
             myTrades.append(trade)
-            client.resolve(self.myTrades, messageHash)
+            currentTrades = ArrayCacheBySymbolById(1) if self.newUpdates and client.message_queue_enabled(messageHash) else myTrades
+            if currentTrades is not myTrades:
+                currentTrades.append(trade)
+            client.resolve(currentTrades, messageHash)
             messageHashSymbol = messageHash + ':' + symbol
-            client.resolve(self.myTrades, messageHashSymbol)
+            client.resolve(currentTrades if client.message_queue_enabled(messageHashSymbol) else myTrades, messageHashSymbol)
 
     def handle_order(self, client: Client, message: object):
         parsed = self.parse_ws_order(message)
@@ -5077,8 +5080,11 @@ class binance(ccxt.async_support.binance):
             cachedOrders.append(parsed)
             messageHash = 'orders'
             symbolSpecificMessageHash = 'orders:' + symbol
-            client.resolve(cachedOrders, messageHash)
-            client.resolve(cachedOrders, symbolSpecificMessageHash)
+            currentOrders = ArrayCacheBySymbolById(1) if self.newUpdates and client.message_queue_enabled(messageHash) else cachedOrders
+            if currentOrders is not cachedOrders:
+                currentOrders.append(parsed)
+            client.resolve(currentOrders, messageHash)
+            client.resolve(currentOrders if client.message_queue_enabled(symbolSpecificMessageHash) else cachedOrders, symbolSpecificMessageHash)
 
     def handle_acount_update(self, client: Client, message: object):
         self.handle_balance(client, message)

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import json
+from collections import deque
+from copy import deepcopy
 
 # use orjson if importable, otherwise default to the stdlib json
 try:
@@ -68,6 +70,8 @@ class Client(object):
             'on_error_callback': on_error_callback,
             'on_close_callback': on_close_callback,
             'on_connected_callback': on_connected_callback,
+            'messageQueueHashes': [],
+            'messageQueueCapacity': 0,
         }
         settings = {}
         settings.update(defaults)
@@ -77,6 +81,12 @@ class Client(object):
                 setattr(self, key, deep_extend(getattr(self, key), settings[key]))
             else:
                 setattr(self, key, settings[key])
+        self.messageQueueHashes = set(self.messageQueueHashes)
+        if self.messageQueueHashes and self.messageQueueCapacity <= 0:
+            raise ValueError('messageQueueCapacity must be positive when messageQueueHashes is configured')
+        self.messageQueue = {}
+        self.messageQueueSize = 0
+        self.messageQueueError = None
         # connection-related Future
         if "options" in config:
             self.options = config["options"]
@@ -102,6 +112,20 @@ class Client(object):
         self.last_message_at = None
 
     def future(self, message_hash):
+        if self.message_queue_enabled(message_hash):
+            if self.messageQueueError is not None:
+                future = Future()
+                future.reject(self.messageQueueError)
+                return future
+            queue = self.messageQueue.get(message_hash)
+            if queue:
+                result, size = queue.popleft()
+                self.messageQueueSize -= size
+                if not queue:
+                    del self.messageQueue[message_hash]
+                future = Future()
+                future.resolve(result)
+                return future
         if message_hash not in self.futures or self.futures[message_hash].cancelled():
             self.futures[message_hash] = Future()
         future = self.futures[message_hash]
@@ -116,9 +140,50 @@ class Client(object):
     def reusableFuture(self, message_hash):
         return self.future(message_hash)  # only used in go
 
+    def message_queue_enabled(self, message_hash):
+        return message_hash in self.messageQueueHashes
+
+    def clear_message_queue(self, message_hash=None):
+        if message_hash is None:
+            self.messageQueue.clear()
+            self.messageQueueSize = 0
+            return
+        queue = self.messageQueue.pop(message_hash, None)
+        if queue is not None:
+            self.messageQueueSize -= sum(item[1] for item in queue)
+
+    def fail_message_queue(self, error):
+        self.clear_message_queue()
+        self.messageQueueError = error
+        for message_hash in self.messageQueueHashes:
+            if message_hash in self.futures:
+                future = self.futures[message_hash]
+                future.reject(error)
+                del self.futures[message_hash]
+
     def resolve(self, result, message_hash):
         if self.verbose and message_hash is None:
             self.log(iso8601(milliseconds()), 'resolve received None messageHash')
+        if self.message_queue_enabled(message_hash):
+            if self.messageQueueError is not None:
+                return result
+            snapshot = deepcopy(result)
+            if message_hash in self.futures and not self.futures[message_hash].cancelled():
+                future = self.futures[message_hash]
+                future.resolve(snapshot)
+                del self.futures[message_hash]
+                return result
+            if message_hash in self.futures:
+                del self.futures[message_hash]
+            size = max(1, len(snapshot)) if hasattr(snapshot, '__len__') else 1
+            if self.messageQueueSize + size > self.messageQueueCapacity:
+                error = NetworkError('WebSocket message queue overflow for ' + str(message_hash))
+                self.fail_message_queue(error)
+                return result
+            queue = self.messageQueue.setdefault(message_hash, deque())
+            queue.append((snapshot, size))
+            self.messageQueueSize += size
+            return result
         if message_hash in self.futures:
             future = self.futures[message_hash]
             future.resolve(result)
@@ -127,6 +192,7 @@ class Client(object):
 
     def reject(self, result, message_hash=None):
         if message_hash is not None:
+            self.clear_message_queue(message_hash)
             if message_hash in self.futures:
                 future = self.futures[message_hash]
                 future.reject(result)
@@ -134,6 +200,7 @@ class Client(object):
             else:
                 self.rejections[message_hash] = result
         else:
+            self.clear_message_queue()
             message_hashes = list(self.futures.keys())
             for message_hash in message_hashes:
                 self.reject(result, message_hash)
@@ -360,6 +427,7 @@ class Client(object):
             self.log(iso8601(milliseconds()), 'closing', code)
         for future in self.futures.values():
             future.cancel()
+        self.clear_message_queue()
         await self.aiohttp_close()
 
     async def aiohttp_close(self):

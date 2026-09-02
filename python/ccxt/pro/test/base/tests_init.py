@@ -9,7 +9,9 @@ from ccxt.pro.test.base.test_cache import test_ws_cache  # noqa: F401
 from ccxt.pro.test.base.test_cache_native import test_ws_cache_python_regressions  # noqa: F401  # hand-written python-only
 # todo : from ccxt.pro.test.base.test_close import test_ws_close  # noqa: F401
 from ccxt.pro.test.base.test_future import test_ws_future  # noqa: F401
+from ccxt.pro.test.base.test_message_queue import test_message_queue, test_private_stream_batches  # noqa: F401
 from ccxt.pro.test.base.test_abnormal_close import test_abnormal_close  # noqa: F401
+
 
 async def test_base_init_ws():
     test_ws_order_book()
@@ -17,4 +19,6 @@ async def test_base_init_ws():
     test_ws_cache_python_regressions()  # hand-written python-only
     # todo : run(test_ws_close())
     await test_ws_future()
+    await test_message_queue()
+    await test_private_stream_batches()
     # run(test_abnormal_close()) stays in infinite loop in travis

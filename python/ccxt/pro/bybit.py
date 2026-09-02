@@ -1389,6 +1389,7 @@ class bybit(ccxt.async_support.bybit):
             limit = self.safe_integer(self.options, 'tradesLimit', 1000)
             self.myTrades = ArrayCacheBySymbolById(limit)
         trades = self.myTrades
+        currentTrades = ArrayCacheBySymbolById(max(len(data), 1)) if self.newUpdates and client.message_queue_enabled('myTrades') else trades
         symbols = {}
         # the option was renamed from filterExecTypes to execType to mirror
         # the exchange's own field name, the old key is still read
@@ -1422,13 +1423,15 @@ class bybit(ccxt.async_support.bybit):
                 continue
             symbols[symbol] = True
             trades.append(parsed)
+            if currentTrades is not trades:
+                currentTrades.append(parsed)
         keys = list(symbols.keys())
         for i in range(0, len(keys)):
             currentMessageHash = 'myTrades:' + keys[i]
-            client.resolve(trades, currentMessageHash)
+            client.resolve(currentTrades if client.message_queue_enabled(currentMessageHash) else trades, currentMessageHash)
         # non-symbol specific
         messageHash = 'myTrades'
-        client.resolve(trades, messageHash)
+        client.resolve(currentTrades, messageHash)
 
     async def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params={}) -> list[Position]:
         """
@@ -1896,6 +1899,7 @@ class bybit(ccxt.async_support.bybit):
         isSpot = category == 'spot'
         if not isSpot:
             rawOrders = self.safe_value(rawOrders, 'result', rawOrders)
+        currentOrders = ArrayCacheBySymbolById(max(len(rawOrders), 1)) if self.newUpdates and client.message_queue_enabled('orders') else orders
         symbols = {}
         for i in range(0, len(rawOrders)):
             parsed = self.parse_order(rawOrders[i])
@@ -1909,12 +1913,14 @@ class bybit(ccxt.async_support.bybit):
                 continue
             symbols[symbol] = True
             orders.append(parsed)
+            if currentOrders is not orders:
+                currentOrders.append(parsed)
         symbolsArray = list(symbols.keys())
         for i in range(0, len(symbolsArray)):
             currentMessageHash = 'orders:' + symbolsArray[i]
-            client.resolve(orders, currentMessageHash)
+            client.resolve(currentOrders if client.message_queue_enabled(currentMessageHash) else orders, currentMessageHash)
         messageHash = 'orders'
-        client.resolve(orders, messageHash)
+        client.resolve(currentOrders, messageHash)
 
     async def watch_balance(self, params={}) -> Balances:
         """
