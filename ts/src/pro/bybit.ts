@@ -2452,7 +2452,7 @@ export default class bybit extends bybitRest {
             };
             message = this.extend (request, params);
             subscription = {
-                'id': reqId,
+                'id': this.safeString (message, 'req_id'),
                 'topics': newTopics,
             };
         }
@@ -2583,6 +2583,9 @@ export default class bybit extends bybitRest {
                         delete client.subscriptions[messageHash];
                         client.reject (error, messageHash);
                     }
+                }
+                if (foundSubscription && (reqId in client.futures)) {
+                    client.reject (error, reqId);
                 }
             }
             if (!foundSubscription) {
