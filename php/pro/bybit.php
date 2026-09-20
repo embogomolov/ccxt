@@ -2534,7 +2534,7 @@ class bybit extends \ccxt\async\bybit {
             );
             $message = $this->extend($request, $params);
             $subscription = array(
-                'id' => $reqId,
+                'id' => $this->safe_string($message, 'req_id'),
                 'topics' => $newTopics,
             );
         }
@@ -2673,6 +2673,9 @@ class bybit extends \ccxt\async\bybit {
                         unset($client->subscriptions[$messageHash]);
                         $client->reject($error, $messageHash);
                     }
+                }
+                if ($foundSubscription && (is_array($client->futures) && array_key_exists($reqId ?? '', $client->futures))) {
+                    $client->reject($error, $reqId);
                 }
             }
             if (!$foundSubscription) {
