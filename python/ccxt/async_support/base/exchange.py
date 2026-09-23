@@ -990,6 +990,13 @@ class BaseExchange(SyncExchange):
                 self.options['limitsLoaded'] = self.milliseconds()
         return self.markets
 
+    async def before_rest_request(self, path: object, api: object = 'public', method='GET', params={}, headers: object = None, body: object = None, config={}):
+        """
+ @ignore
+        ожидает разрешение перед подписью каждой REST-попытки
+        """
+        return None
+
     async def fetch2(self, path: object, api: object = 'public', method='GET', params={}, headers: object = None, body: object = None, config={}):
         if self.enableRateLimit:
             cost = self.calculate_rate_limiter_cost(api, method, path, params, config)
@@ -1000,6 +1007,7 @@ class BaseExchange(SyncExchange):
         retryDelay, params = self.handle_option_and_params(params, path, 'maxRetriesOnFailureDelay', retryDelay)
         fetchDataCacheEnabled = self.fetchHistoryCacheSize > 0
         for i in range(0, retries + 1):
+            await self.before_rest_request(path, api, method, params, headers, body, config)
             fetchData = None
             if fetchDataCacheEnabled:
                 fetchData = {'request': None, 'response': {'body': None}, 'error': None}

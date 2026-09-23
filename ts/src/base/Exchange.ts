@@ -6435,6 +6435,14 @@ export class BaseExchange {
         return results;
     }
 
+    /**
+     * @ignore
+     * @description ожидает разрешение перед подписью каждой REST-попытки
+     */
+    async beforeRestRequest (path: any, api: any = 'public', method = 'GET', params = {}, headers: any = undefined, body: any = undefined, config = {}): Promise<undefined> {
+        return undefined;
+    }
+
     async fetch2 (path: any, api: any = 'public', method = 'GET', params = {}, headers: any = undefined, body: any = undefined, config = {}) {
         if (this.enableRateLimit) {
             const cost = this.calculateRateLimiterCost (api, method, path, params, config);
@@ -6446,6 +6454,7 @@ export class BaseExchange {
         [ retryDelay, params ] = this.handleOptionAndParams (params, path, 'maxRetriesOnFailureDelay', retryDelay);
         const fetchDataCacheEnabled = this.fetchHistoryCacheSize > 0;
         for (let i = 0; i < retries + 1; i++) {
+            await this.beforeRestRequest (path, api, method, params, headers, body, config);
             let fetchData: NullableDict = undefined;
             if (fetchDataCacheEnabled) {
                 fetchData = { 'request': undefined, 'response': { 'body': undefined }, 'error': undefined };
