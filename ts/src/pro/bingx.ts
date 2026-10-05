@@ -1666,7 +1666,7 @@ export default class bingx extends bingxRest {
         const parsedOrder = this.parseOrder (data);
         if (!isSpot) {
             // The envelope T is the order update time; o.T is the trade time.
-            const updateTimestamp = this.safeInteger (message, 'T');
+            const updateTimestamp = this.safeInteger2 (message, 'T', 'E');
             if ((updateTimestamp !== undefined) && (updateTimestamp > 0)) {
                 const orderId = this.safeString (parsedOrder, 'id');
                 if (orderId !== undefined) {
@@ -1684,6 +1684,11 @@ export default class bingx extends bingxRest {
                     }
                 }
                 parsedOrder['lastUpdateTimestamp'] = updateTimestamp;
+            }
+        } else {
+            const timestamp = this.safeInteger (message, 'E');
+            if (timestamp !== undefined) {
+                parsedOrder['lastUpdateTimestamp'] = timestamp;
             }
         }
         stored.append (parsedOrder);
@@ -1770,6 +1775,14 @@ export default class bingx extends bingxRest {
         const marketId = this.safeString (result, 's');
         const market = this.safeMarket (marketId, undefined, '-', type);
         const parsed = this.parseTrade (result, market);
+        if (!isSpot) {
+            parsed['id'] = this.safeString2 (result, 'td', 't');
+            parsed['amount'] = this.safeNumber (result, 'l');
+            parsed['price'] = this.safeNumber (result, 'L');
+            parsed['cost'] = this.parseNumber (Precise.stringMul (this.safeString (result, 'l'), this.safeString (result, 'L')));
+            parsed['timestamp'] = this.safeInteger (parsed, 'timestamp', this.safeInteger (message, 'E'));
+            parsed['datetime'] = this.iso8601 (parsed['timestamp']);
+        }
         const symbol = parsed['symbol'];
         const spotHash = 'spot:mytrades';
         const swapHash = 'swap:mytrades';
@@ -1911,9 +1924,19 @@ export default class bingx extends bingxRest {
                 // delivering it would report the order aggregate `q`/`p` as a single fill.
                 isExecution = (market['linear'] === true) && (this.safeString (data, 'l') !== undefined) && (this.safeString (data, 'L') !== undefined);
             }
-            if ((type === 'TRADE') && isExecution) {
+            const tradeId = this.safeString2 (data, 'td', 't');
+            if ((type === 'TRADE') && isExecution && (tradeId !== undefined) && (tradeId !== '0')) {
                 this.handleMyTrades (client, message);
             }
+        }
+        if (e === 'TRADE_UPDATE') {
+            this.handleOrder (client, message);
+            this.handleMyTrades (client, message);
+        }
+        if (e === 'listenKeyExpired') {
+            this.options['listenKey'] = undefined;
+            this.options['lastAuthenticatedTime'] = 0;
+            client.reject (new NetworkError (this.id + ' private listen key expired'));
         }
         const msgData = this.safeDict (message, 'data');
         const msgEvent = this.safeString (msgData, 'e');
