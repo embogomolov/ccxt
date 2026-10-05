@@ -1995,7 +1995,7 @@ export default class bingx extends Exchange {
             }
             const response = await this.swapV2PrivateGetUserIncome (this.extend (params, request));
             const rows = this.safeList (response, 'data');
-            if ((this.safeString (response, 'code') !== '0') || ((rows === undefined) && (response['data'] !== null))) {
+            if ((this.safeString (response, 'code') !== '0') || !('data' in response) || ((rows === undefined) && (response['data'] !== null))) {
                 throw new OperationFailed (this.id + ' funding history response is incomplete');
             }
             const data = (rows === undefined) ? [] : rows;
