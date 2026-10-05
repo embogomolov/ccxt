@@ -13,6 +13,7 @@ import testTypes from './test.type.js';
 import testOnJsonResponse from './test.onJsonResponse.js';
 import testPrecisionFromStringZero from './test.precisionFromString.js';
 import testBingxTestOrder from './test.bingxTestOrder.js';
+import testBingxHistory from './test.bingxHistory.js';
 import testFetchTradesDiagnostics from './test.fetchTradesDiagnostics.js';
 import testOptionTypes from './test.optionTypes.js';
 // todo: import testConfig from './test.config.js';
@@ -29,6 +30,7 @@ async function testLanguageSpecific () {
     testOptionTypes ();
     testPrecisionFromStringZero ();
     await testBingxTestOrder ();
+    await testBingxHistory ();
     await testFetchTradesDiagnostics ();
     // testConfig ();
 }
