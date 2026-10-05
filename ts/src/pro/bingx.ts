@@ -1631,6 +1631,10 @@ export default class bingx extends bingxRest {
         }
         const stored = this.orders;
         const parsedOrder = this.parseOrder (data);
+        const timestamp = this.safeInteger (message, 'E');
+        if (timestamp !== undefined) {
+            parsedOrder['lastUpdateTimestamp'] = timestamp;
+        }
         stored.append (parsedOrder);
         const symbol = parsedOrder['symbol'];
         const spotHash = 'spot:order';
@@ -1709,6 +1713,14 @@ export default class bingx extends bingxRest {
         const marketId = this.safeString (result, 's');
         const market = this.safeMarket (marketId, undefined, '-', type);
         const parsed = this.parseTrade (result, market);
+        if (!isSpot) {
+            parsed['id'] = this.safeString2 (result, 'td', 't');
+            parsed['amount'] = this.safeNumber (result, 'l');
+            parsed['price'] = this.safeNumber (result, 'L');
+            parsed['cost'] = this.parseNumber (Precise.stringMul (this.safeString (result, 'l'), this.safeString (result, 'L')));
+            parsed['timestamp'] = this.safeInteger (parsed, 'timestamp', this.safeInteger (message, 'E'));
+            parsed['datetime'] = this.iso8601 (parsed['timestamp']);
+        }
         const symbol = parsed['symbol'];
         const spotHash = 'spot:mytrades';
         const swapHash = 'swap:mytrades';
@@ -1825,12 +1837,20 @@ export default class bingx extends bingxRest {
         }
         if (e === 'ORDER_TRADE_UPDATE') {
             this.handleOrder (client, message);
-            const data = this.safeValue (message, 'o', {});
-            const type = this.safeString (data, 'x');
-            const status = this.safeString (data, 'X');
-            if ((type === 'TRADE') && (status === 'FILLED')) {
+            const data = this.safeDict (message, 'o', {});
+            const tradeId = this.safeString2 (data, 'td', 't');
+            if ((this.safeString (data, 'x') === 'TRADE') && (tradeId !== undefined) && (tradeId !== '0')) {
                 this.handleMyTrades (client, message);
             }
+        }
+        if (e === 'TRADE_UPDATE') {
+            this.handleOrder (client, message);
+            this.handleMyTrades (client, message);
+        }
+        if (e === 'listenKeyExpired') {
+            this.options['listenKey'] = undefined;
+            this.options['lastAuthenticatedTime'] = 0;
+            client.reject (new NetworkError (this.id + ' private listen key expired'));
         }
         const msgData = this.safeValue (message, 'data');
         const msgEvent = this.safeString (msgData, 'e');
