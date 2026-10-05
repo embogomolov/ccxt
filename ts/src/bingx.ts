@@ -3089,8 +3089,23 @@ export default class bingx extends Exchange {
             //     }
             //
         }
-        const data = this.safeList (response, 'data', []);
-        const first = this.safeDict (data, 0, {}) as Dict;
+        const data = this.safeList (response, 'data');
+        if (data === undefined) {
+            throw new ExchangeError (this.id + ' fetchPosition() requires a positions list');
+        }
+        if (data.length === 0) {
+            return this.safePosition ({
+                'info': response,
+                'symbol': market['symbol'],
+                'contracts': 0,
+            });
+        }
+        const first = this.safeDict (data, 0);
+        const positionAmount = this.safeNumber (first, 'positionAmt');
+        // Разность конечного числа с собой равна нулю; NaN и бесконечность не подтверждают объём.
+        if ((first === undefined) || (this.safeString (first, 'symbol') !== market['id']) || (positionAmount === undefined) || ((positionAmount - positionAmount) !== 0)) {
+            throw new ExchangeError (this.id + ' fetchPosition() requires a matching position with positionAmt');
+        }
         return this.parsePosition (first, market);
     }
 
