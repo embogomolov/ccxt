@@ -1533,7 +1533,7 @@ export default class bingx extends Exchange {
         //     }
         //
         let time = this.safeIntegerN (trade, [ 'time', 'filledTm', 'T', 'tradeTime' ]);
-        const datetimeId = this.safeString (trade, 'filledTm');
+        const datetimeId = this.safeString2 (trade, 'filledTime', 'filledTm');
         if (datetimeId !== undefined) {
             time = this.parse8601 (datetimeId);
         }
@@ -1547,7 +1547,7 @@ export default class bingx extends Exchange {
         const m = this.safeBool (trade, 'm');
         const marketId = this.safeString2 (trade, 's', 'symbol');
         const isBuyerMaker = this.safeBoolN (trade, [ 'buyerMaker', 'isBuyerMaker', 'maker' ]);
-        let takeOrMaker: Str = undefined;
+        let takeOrMaker = this.safeStringLower (trade, 'role');
         const isMakerSide = (isBuyerMaker === true) || (m === true);
         if ((isBuyerMaker !== undefined) || (m !== undefined)) {
             takeOrMaker = isMakerSide ? 'maker' : 'taker';
@@ -1584,7 +1584,7 @@ export default class bingx extends Exchange {
             }
         }
         return this.safeTrade ({
-            'id': this.safeString2 (trade, 'id', 't'),
+            'id': this.safeStringN (trade, [ 'tradeId', 'id', 't' ]),
             'info': trade,
             'timestamp': time,
             'datetime': this.iso8601 (time),
@@ -1597,7 +1597,7 @@ export default class bingx extends Exchange {
             'amount': amount,
             'cost': cost,
             'fee': {
-                'cost': this.parseNumber (Precise.stringAbs (this.safeString2 (trade, 'commission', 'n'))),
+                'cost': this.parseNumber (Precise.stringNeg (this.safeString2 (trade, 'commission', 'n'))),
                 'currency': currencyCode,
             },
         }, market);
@@ -3975,6 +3975,7 @@ export default class bingx extends Exchange {
             market = this.safeMarket (marketId, undefined, undefined, marketType);
         }
         const side = this.safeStringLower2 (order, 'side', 'S');
+        const closingHedge = (market['swap'] === true) && (((positionSide === 'LONG') && (side === 'sell')) || ((positionSide === 'SHORT') && (side === 'buy')));
         const timestamp = this.safeIntegerN (order, [ 'time', 'transactTime', 'E', 'createdTime' ]);
         const lastTradeTimestamp = this.safeInteger2 (order, 'updateTime', 'T');
         const statusId = this.safeStringUpperN (order, [ 'status', 'X', 'orderStatus' ]);
@@ -4057,7 +4058,7 @@ export default class bingx extends Exchange {
                 'cost': Precise.stringAbs (feeCost),
             },
             'trades': undefined,
-            'reduceOnly': this.safeBool2 (order, 'reduceOnly', 'ro'),
+            'reduceOnly': closingHedge ? true : this.safeBool2 (order, 'reduceOnly', 'ro'),
         }, market);
     }
 
@@ -4750,6 +4751,65 @@ export default class bingx extends Exchange {
     }
 
     /**
+     * @ignore
+     * @description получает страницы истории ордеров в семидневных окнах без потери одинаковых clientOrderId
+     */
+    async fetchPaginatedOrders (symbol: Str, since: Int, limit: Int, params: Dict): Promise<Order[]> {
+        const until = this.safeInteger2 (params, 'until', 'endTime', this.milliseconds ());
+        if ((since === undefined) || (since < 0) || (until < since)) {
+            throw new ArgumentsRequired (this.id + ' paginated orders require since <= until');
+        }
+        let remainingCalls = undefined;
+        [ remainingCalls, params ] = this.handleOptionAndParams (params, 'fetchOrders', 'paginationCalls', 10);
+        params = this.omit (params, [ 'until', 'endTime', 'orderId', 'limit', 'startTime' ]);
+        const market = (symbol === undefined) ? undefined : this.market (symbol);
+        const records: Dict = {};
+        let windowStart = since;
+        let cursor = '0';
+        while (windowStart <= until) {
+            if (remainingCalls <= 0) {
+                throw new OperationFailed (this.id + ' order history exceeds paginationCalls');
+            }
+            remainingCalls -= 1;
+            const windowEnd = Math.min (until, windowStart + 7 * 86400000 - 2);
+            const request: Dict = {
+                'startTime': Math.max (0, windowStart - 1), 'endTime': windowEnd + 1,
+                'orderId': cursor, 'limit': 1000,
+            };
+            if (market !== undefined) {
+                request['symbol'] = market['id'];
+            }
+            const response = await this.swapV2PrivateGetTradeAllOrders (this.extend (params, request));
+            const data = this.safeDict (response, 'data', {});
+            const rows = this.safeList (data, 'orders');
+            if ((this.safeString (response, 'code') !== '0') || (rows === undefined)) {
+                throw new OperationFailed (this.id + ' order history response is incomplete');
+            }
+            let nextCursor = cursor;
+            const pageIds: Dict = {};
+            for (let index = 0; index < rows.length; index++) {
+                const row = rows[index];
+                const orderId = this.safeString (row, 'orderId');
+                if ((orderId === undefined) || !Precise.stringGt (orderId, nextCursor) || (this.safeBool (pageIds, orderId) === true)) {
+                    throw new OperationFailed (this.id + ' order history cursor does not advance');
+                }
+                pageIds[orderId] = true;
+                if (Precise.stringGt (orderId, nextCursor)) {
+                    nextCursor = orderId;
+                }
+                records[orderId] = row;
+            }
+            if (rows.length < 1000) {
+                windowStart = windowEnd + 1;
+                cursor = '0';
+            } else {
+                cursor = nextCursor;
+            }
+        }
+        return this.parseOrders (this.toArray (records), market, undefined, limit);
+    }
+
+    /**
      * @method
      * @name bingx#fetchOrders
      * @description fetches information on multiple orders made by the user
@@ -4761,6 +4821,8 @@ export default class bingx extends Exchange {
      * @param {object} [params] extra parameters specific to the exchange API endpoint
      * @param {int} [params.until] the latest time in ms to fetch entries for
      * @param {int} [params.orderId] Only return subsequent orders, and return the latest order by default
+     * @param {boolean} [params.paginate] получает все страницы заданного интервала; неполнота вызывает OperationFailed
+     * @param {int} [params.paginationCalls] максимальное число запросов истории, по умолчанию 10
      * @returns {Order[]} a list of [order structures]{@link https://docs.ccxt.com/?id=order-structure}
      */
     override async fetchOrders (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}): Promise<Order[]> {
@@ -4777,6 +4839,11 @@ export default class bingx extends Exchange {
         [ type, params ] = this.handleMarketTypeAndParams ('fetchOrders', market, params);
         if (type !== 'swap') {
             throw new NotSupported (this.id + ' fetchOrders() is only supported for swap markets');
+        }
+        let paginate = false;
+        [ paginate, params ] = this.handleOptionAndParams (params, 'fetchOrders', 'paginate', false);
+        if (paginate) {
+            return await this.fetchPaginatedOrders (symbol, since, limit, params);
         }
         if (limit !== undefined) {
             request['limit'] = limit;
@@ -6081,11 +6148,12 @@ export default class bingx extends Exchange {
      * @param {int} [limit] the maximum number of trades structures to retrieve
      * @param {object} [params] extra parameters specific to the exchange API endpoint
      * @param {int} [params.until] timestamp in ms for the ending date filter, default is undefined
-     * @param {string} params.trandingUnit COIN (directly represent assets such as BTC and ETH) or CONT (represents the number of contract sheets)
      * @param {string} params.orderId the order id required for inverse swap
+     * @param {boolean} [params.paginate] получает все исполнения заданного интервала; переполнение вызывает OperationFailed
+     * @param {int} [params.paginationCalls] максимальное число запросов, по умолчанию 10
      * @returns {object[]} a list of [trade structures]{@link https://docs.ccxt.com/?id=trade-structure}
      */
-    override async fetchMyTrades (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}) {
+    override async fetchMyTrades (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params = {}): Promise<Trade[]> {
         if (symbol === undefined) {
             throw new ArgumentsRequired (this.id + ' fetchMyTrades() requires a symbol argument');
         }
@@ -6093,122 +6161,115 @@ export default class bingx extends Exchange {
             await this.loadMarkets ();
         }
         const market = this.market (symbol);
-        const request: Dict = {};
-        let fills: Trade[];
-        let response: Dict;
         let subType: Str = undefined;
         [ subType, params ] = this.handleSubTypeAndParams ('fetchMyTrades', market, params);
+        if ((market['swap'] === true) && (subType !== 'inverse')) {
+            return await this.fetchSwapTrades (symbol, since, limit, params);
+        }
+        let request: Dict = {};
+        let fills: List;
         if (subType === 'inverse') {
-            const orderId = this.safeString (params, 'orderId');
-            if (orderId === undefined) {
-                throw new ArgumentsRequired (this.id + ' fetchMyTrades() requires an orderId argument for inverse swap trades');
+            if (this.safeString (params, 'orderId') === undefined) {
+                throw new ArgumentsRequired (this.id + ' fetchMyTrades() requires orderId for inverse swap trades');
             }
-            response = await this.cswapV1PrivateGetTradeAllFillOrders (this.extend (request, params));
-            fills = this.safeList (response, 'data', []) as Trade[];
-            //
-            //     {
-            //         "code": 0,
-            //         "msg": "",
-            //         "timestamp": 1722147756019,
-            //         "data": [
-            //             {
-            //                 "orderId": "1817441228670648320",
-            //                 "symbol": "SOL-USD",
-            //                 "type": "MARKET",
-            //                 "side": "BUY",
-            //                 "positionSide": "LONG",
-            //                 "tradeId": "97244554",
-            //                 "volume": "2",
-            //                 "tradePrice": "182.652",
-            //                 "amount": "20.00000000",
-            //                 "realizedPnl": "0.00000000",
-            //                 "commission": "-0.00005475",
-            //                 "currency": "SOL",
-            //                 "buyer": true,
-            //                 "maker": false,
-            //                 "tradeTime": 1722146730000
-            //             }
-            //         ]
-            //     }
-            //
+            const response = await this.cswapV1PrivateGetTradeAllFillOrders (params);
+            fills = this.safeList (response, 'data', []);
         } else {
             request['symbol'] = market['id'];
-            const now = this.milliseconds ();
             if (since !== undefined) {
-                const startTimeReq = (market['spot'] === true) ? 'startTime' : 'startTs';
-                request[startTimeReq] = since;
-            } else if (market['swap'] === true) {
-                request['startTs'] = now - 30 * 24 * 60 * 60 * 1000; // 30 days for swap
+                request['startTime'] = since;
             }
-            const until = this.safeInteger (params, 'until');
-            params = this.omit (params, 'until');
-            if (until !== undefined) {
-                const endTimeReq = (market['spot'] === true) ? 'endTime' : 'endTs';
-                request[endTimeReq] = until;
-            } else if (market['swap'] === true) {
-                request['endTs'] = now;
+            if (limit !== undefined) {
+                request['limit'] = limit;
             }
-            if (market['spot'] === true) {
-                if (limit !== undefined) {
-                    request['limit'] = limit; // default 500, maximum 1000
-                }
-                response = await this.spotV1PrivateGetTradeMyTrades (this.extend (request, params));
-                const data = this.safeDict (response, 'data', {});
-                fills = this.safeList (data, 'fills', []) as Trade[];
-                //
-                //     {
-                //         "code": 0,
-                //         "msg": "",
-                //         "debugMsg": "",
-                //         "data": {
-                //             "fills": [
-                //                 {
-                //                     "symbol": "LTC-USDT",
-                //                     "id": 36237072,
-                //                     "orderId": 1674069326895775744,
-                //                     "price": "85.891",
-                //                     "qty": "0.0582",
-                //                     "quoteQty": "4.9988562000000005",
-                //                     "commission": -0.00005820000000000001,
-                //                     "commissionAsset": "LTC",
-                //                     "time": 1687964205000,
-                //                     "isBuyer": true,
-                //                     "isMaker": false
-                //                 }
-                //             ]
-                //         }
-                //     }
-                //
-            } else {
-                const tradingUnit = this.safeStringUpper (params, 'tradingUnit', 'CONT');
-                params = this.omit (params, 'tradingUnit');
-                request['tradingUnit'] = tradingUnit;
-                response = await this.swapV2PrivateGetTradeAllFillOrders (this.extend (request, params));
-                const data = this.safeDict (response, 'data', {});
-                fills = this.safeList (data, 'fill_orders', []) as Trade[];
-                //
-                //    {
-                //       "code": "0",
-                //       "msg": '',
-                //       "data": { fill_orders: [
-                //          {
-                //              "volume": "0.1",
-                //              "price": "106.75",
-                //              "amount": "10.6750",
-                //              "commission": "-0.0053",
-                //              "currency": "USDT",
-                //              "orderId": "1676213270274379776",
-                //              "liquidatedPrice": "0.00",
-                //              "liquidatedMarginRatio": "0.00",
-                //              "filledTime": "2023-07-04T20:56:01.000+0800"
-                //          }
-                //        ]
-                //      }
-                //    }
-                //
-            }
+            [ request, params ] = this.handleUntilOption ('endTime', request, params);
+            const response = await this.spotV1PrivateGetTradeMyTrades (this.extend (request, params));
+            const data = this.safeDict (response, 'data', {});
+            fills = this.safeList (data, 'fills', []);
         }
         return this.parseTrades (fills, market, since, limit, params);
+    }
+
+    /**
+     * @ignore
+     * @description получает исполнения с реальными tradeId; насыщенный интервал делится по времени
+     */
+    async fetchSwapTrades (symbol: string, since: Int, limit: Int, params: Dict): Promise<Trade[]> {
+        const market = this.market (symbol);
+        const now = this.milliseconds ();
+        const retention = 7 * 86400000;
+        since = (since === undefined) ? (now - retention + 1) : since;
+        const until = this.safeInteger2 (params, 'until', 'endTs', now);
+        if ((since < now - retention) || (since < 0) || (until < since)) {
+            throw new ArgumentsRequired (this.id + ' fillHistory requires an ordered interval within the last seven days');
+        }
+        let paginate = false;
+        [ paginate, params ] = this.handleOptionAndParams (params, 'fetchMyTrades', 'paginate', false);
+        let remainingCalls = undefined;
+        [ remainingCalls, params ] = this.handleOptionAndParams (params, 'fetchMyTrades', 'paginationCalls', 10);
+        params = this.omit (params, [ 'until', 'endTs', 'startTs', 'pageSize', 'pageIndex', 'lastFillId', 'tradingUnit' ]);
+        const orderId = this.safeString (params, 'orderId');
+        const pageSize = paginate ? 1000 : Math.min (this.safeInteger ({ 'limit': limit }, 'limit', 1000), 1000);
+        const windows = [ [ since, until ] ];
+        const trades: Dict = {};
+        while (windows.length > 0) {
+            if (remainingCalls <= 0) {
+                throw new OperationFailed (this.id + ' fill history exceeds paginationCalls');
+            }
+            remainingCalls -= 1;
+            const window = windows.pop () as number[];
+            const windowStart = window[0];
+            const windowEnd = window[1];
+            const request: Dict = {
+                'symbol': market['id'], 'startTs': Math.max (0, windowStart - 1),
+                'endTs': windowEnd + 1, 'pageSize': pageSize, 'pageIndex': 1,
+            };
+            const response = await this.swapV2PrivateGetTradeFillHistory (this.extend (params, request));
+            const data = this.safeDict (response, 'data', {});
+            const rows = this.safeList (data, 'fill_history_orders');
+            const total = this.safeInteger (data, 'total');
+            if ((this.safeString (response, 'code') !== '0') || (rows === undefined) || (total === undefined) || (total < rows.length)) {
+                throw new OperationFailed (this.id + ' fill history response is incomplete');
+            }
+            if (paginate && ((total >= pageSize) || (total !== rows.length))) {
+                if (windowStart === windowEnd) {
+                    throw new OperationFailed (this.id + ' fill history overflows one timestamp');
+                }
+                const middle = this.parseToInt ((windowStart + windowEnd) / 2);
+                windows.push ([ middle + 1, windowEnd ]);
+                windows.push ([ windowStart, middle ]);
+                continue;
+            }
+            const pageIds: Dict = {};
+            for (let index = 0; index < rows.length; index++) {
+                const row = rows[index];
+                const tradeId = this.safeString (row, 'tradeId');
+                const timestamp = this.parse8601 (this.safeString (row, 'filledTime'));
+                const actualOrderId = this.safeString (row, 'orderId');
+                if ((tradeId === undefined) || (tradeId === '0') || (actualOrderId === undefined) || (timestamp === undefined) || (this.safeBool (pageIds, tradeId) === true)) {
+                    throw new OperationFailed (this.id + ' fill history has invalid identity or timestamp');
+                }
+                if ((orderId !== undefined) && (orderId !== actualOrderId)) {
+                    throw new OperationFailed (this.id + ' fill history does not match orderId');
+                }
+                if ((timestamp < windowStart - 1) || (timestamp > windowEnd + 1)) {
+                    throw new OperationFailed (this.id + ' fill history does not match time bounds');
+                }
+                pageIds[tradeId] = true;
+                if ((timestamp < windowStart) || (timestamp > windowEnd)) {
+                    continue;
+                }
+                if (tradeId in trades) {
+                    throw new OperationFailed (this.id + ' fill identity has conflicting timestamps');
+                }
+                const parsed = this.parseTrade (row, market);
+                if ((parsed['amount'] === undefined) || (parsed['price'] === undefined) || (parsed['cost'] === undefined) || (this.safeString (row, 'commission') === undefined) || (this.safeString (row, 'commissionAsset') === undefined)) {
+                    throw new OperationFailed (this.id + ' fill history lacks execution amounts or fees');
+                }
+                trades[tradeId] = parsed;
+            }
+        }
+        return this.filterBySinceLimit (this.sortBy (this.toArray (trades), 'timestamp'), since, limit) as Trade[];
     }
 
     override parseDepositWithdrawFee (fee: any, currency: Currency = undefined) {

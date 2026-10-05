@@ -1602,12 +1602,11 @@
                 ]
             },
             {
-                "description": "fetch my trades - swap",
+                "description": "История linear swap с идентификаторами исполнений",
                 "method": "fetchMyTrades",
-                "url": "https://open-api.bingx.com/openApi/swap/v2/trade/allFillOrders?endTs=1705040628035&startTs=1687964205000&symbol=LTC-USDT&tradingUnit=CONT&timestamp=1699460638640&signature=e5942598ddd9d11cceec8f7e2acb3269c8c2dfe237642314eca3b5d8a5c308e0",
+                "url": "https://open-api.bingx.com/openApi/swap/v2/trade/fillHistory?endTs=1791201029927&pageIndex=1&pageSize=1000&startTs=1790596229926&symbol=LTC-USDT&timestamp=1791201029926&signature=placeholder",
                 "input": [
-                    "LTC/USDT:USDT",
-                    1687964205000
+                    "LTC/USDT:USDT"
                 ]
             },
             {
@@ -1615,12 +1614,12 @@
                 "method": "fetchMyTrades",
                 "url": "https://open-api.bingx.com/openApi/cswap/v1/trade/allFillOrders?orderId=1817441228670648320&timestamp=1722148745974&signature=a926e3297d82ba03838a706b1b8827677065edab600277afe7256e3e43d83d05",
                 "input": [
-                  "SOL/USD:SOL",
-                  null,
-                  null,
-                  {
-                    "orderId": "1817441228670648320"
-                  }
+                    "SOL/USD:SOL",
+                    null,
+                    null,
+                    {
+                        "orderId": "1817441228670648320"
+                    }
                 ]
             }
         ],
