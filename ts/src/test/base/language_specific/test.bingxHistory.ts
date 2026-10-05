@@ -6,6 +6,25 @@ import ccxt from '../../../../ccxt.js';
 
 async function testBingxHistory () {
     const exchange = new ccxt.bingx ();
+    for (const [ code, msg, errorType ] of [
+        [ 109400, 'invalid quantity', ccxt.BadRequest ],
+        [ 109400, 'order not exist', ccxt.OrderNotFound ],
+        [ 109421, 'order not exist', ccxt.OrderNotFound ],
+        [ 110402, 'price invalid', ccxt.InvalidOrder ],
+        [ 110411, 'SL price invalid', ccxt.InvalidOrder ],
+        [ 110413, 'TP price invalid', ccxt.InvalidOrder ],
+        [ 106551, 'GetFillOrdersListForApi count db has err:sql: no rows in result set', ccxt.OperationFailed ],
+        [ 106551, 'unknown failure', ccxt.ExchangeError ],
+    ]) {
+        const response = { code, msg };
+        assert.throws (() => exchange.handleErrors (200, '', '', 'GET', {}, JSON.stringify (response), response, {}, undefined), errorType);
+    }
+    const demoExchange = new ccxt.bingx ({ 'commonCurrencies': { 'VST': 'USDT' } });
+    const demoBalance = { 'asset': 'VST', 'availableMargin': '10', 'usedMargin': '2' };
+    assert.strictEqual (demoExchange.parseBalance ({ 'data': [ demoBalance ] }).USDT.free, 10);
+    assert.throws (() => demoExchange.parseBalance ({ 'data': [ demoBalance, { ...demoBalance, 'asset': 'USDT' } ] }), ccxt.OperationFailed);
+    assert.strictEqual (demoExchange.safeCurrencyCode ('VST'), 'USDT');
+    assert.strictEqual (exchange.safeCurrencyCode ('VST'), 'VST');
     const symbol = 'ETH/USDT:USDT';
     const timestamp = 1790959600000;
     exchange.setMarkets ([ {

@@ -638,6 +638,11 @@ export default class bingx extends Exchange {
                     '101204': InsufficientFunds, // {"code":101204,"msg":"","data":{}}
                     '101205': InvalidOrder, // {"code":101205,"msg":"No position to close","data":{}}
                     '101400': InvalidOrder, // {"code":101400,"msg":"The minimum order amount is 0.0001 BTC.","data":{}}
+                    '110402': InvalidOrder,
+                    '110411': InvalidOrder,
+                    '110413': InvalidOrder,
+                    'order not exist': OrderNotFound,
+                    'GetFillOrdersListForApi count db has err:sql: no rows in result set': OperationFailed,
                     '110425': InvalidOrder, // {"code":110425,"msg":"Please ensure that the minimum nominal value of the order placed must be greater than 2u","data":{}}
                     '100490': BadSymbol, // spot trading pair is offline
                     '101481': DuplicateOrderId,
@@ -2759,6 +2764,7 @@ export default class bingx extends Exchange {
         const spotData = this.safeDict (response, 'data', {});
         const spotBalances = this.safeList2 (spotData, 'balances', 'assets', []) as List;
         if (isContract) {
+            const currencyIds: Dict = {};
             for (let i = 0; i < contractBalances.length; i++) {
                 const balance = this.safeDict (contractBalances, i);
                 const currencyId = this.safeString (balance, 'asset');
@@ -2771,6 +2777,11 @@ export default class bingx extends Exchange {
                 account['used'] = this.safeString (balance, 'usedMargin');
                 account['total'] = this.safeString2 (balance, 'balance', 'maxWithdrawAmount');
                 if (code !== undefined) {
+                    const previousCurrencyId = this.safeString (currencyIds, code);
+                    if ((previousCurrencyId !== undefined) && (previousCurrencyId !== currencyId)) {
+                        throw new OperationFailed (this.id + ' balance contains conflicting currency aliases: ' + previousCurrencyId + ', ' + currencyId + ' -> ' + code);
+                    }
+                    currencyIds[code] = currencyId;
                     result[code] = account;
                 }
             }
