@@ -178,7 +178,81 @@ async def test_message_queue_lifecycle():
     await replacement.close()
 
 
+async def test_bingx_private_batches(number=float):
+    exchange = ccxtpro.bingx({'newUpdates': True, 'options': {
+        'defaultType': 'swap', 'listenKey': 'test-listen-key',
+        'ws': {'messageQueueHashes': ['swap:order', 'swap:mytrades', 'swap:positions'], 'messageQueueCapacity': 10},
+    }})
+    exchange.number = number
+    exchange.newUpdates = True
+    exchange.set_markets([{
+        'id': 'ETH-USDT', 'symbol': 'ETH/USDT:USDT', 'base': 'ETH',
+        'quote': 'USDT', 'settle': 'USDT', 'type': 'swap', 'spot': False,
+        'swap': True, 'linear': True, 'inverse': False, 'contract': True,
+        'contractSize': 1, 'precision': {'amount': 0.001, 'price': 0.01},
+    }])
+    client = exchange.client('wss://example.invalid')
+
+    async def authenticate(params=None):
+        return None
+
+    async def watch(url, message_hash, *args):
+        return await client.future(message_hash)
+
+    exchange.authenticate = authenticate
+    exchange.watch = watch
+    raw = {
+        's': 'ETH-USDT', 'i': 'order-1', 'c': 'client-1', 'S': 'BUY',
+        'o': 'MARKET', 'q': '0.004', 'p': '2716', 'ap': '2713.85',
+        'x': 'TRADE', 'X': 'FILLED', 'N': 'USDT', 'n': '-0.005',
+        'T': 1000, 'ps': 'LONG', 'z': '0.004', 'td': 0,
+    }
+    first_order = client.future('swap:order')
+    exchange.handle_message(client, {'e': 'ORDER_TRADE_UPDATE', 'E': 1001, 'o': raw})
+    exchange.handle_message(client, {'e': 'ORDER_TRADE_UPDATE', 'E': 1002, 'o': {**raw, 'i': 'order-2'}})
+    assert (await first_order)[0]['id'] == 'order-1'
+    assert (await exchange.watch_orders())[0]['id'] == 'order-2'
+    assert 'swap:mytrades' not in client.messageQueue
+
+    first_trade = client.future('swap:mytrades')
+    exchange.handle_message(client, {'e': 'TRADE_UPDATE', 'E': 1001, 'o': {**raw, 'td': 11}})
+    exchange.handle_message(client, {'e': 'TRADE_UPDATE', 'E': 1002, 'o': {**raw, 'td': 12, 'X': 'PARTIALLY_FILLED', 'l': '0.001', 'L': '2700'}})
+    incomplete = (await first_trade)[0]
+    assert incomplete['id'] == '11'
+    assert incomplete['amount'] is None and incomplete['price'] is None
+    assert incomplete['info']['z'] == '0.004'
+    fill = (await exchange.watch_my_trades())[0]
+    assert fill['id'] == '12' and float(fill['amount']) == 0.001 and float(fill['price']) == 2700
+    assert float(fill['cost']) == 2.7
+    cumulative = (await client.future('swap:order'))[0]
+    assert float(cumulative['filled']) == 0.004
+    assert cumulative['info']['td'] == 11
+    assert (await client.future('swap:order'))[0]['info']['td'] == 12
+
+    first_position = client.future('swap:positions')
+    for quantity in ('0.004', '0'):
+        exchange.handle_positions(client, {'E': 1000, 'a': {'P': [{'s': 'ETH-USDT', 'pa': quantity, 'ps': 'LONG', 'ep': '2700'}]}})
+    assert float((await first_position)[0]['contracts']) == 0.004
+    assert float((await client.future('swap:positions'))[0]['contracts']) == 0
+    pending = client.future('swap:order')
+    exchange.handle_message(client, {'e': 'listenKeyExpired'})
+    assert isinstance(pending.exception(), NetworkError)
+    assert exchange.options['listenKey'] is None
+    await exchange.close()
+
+    ordinary = ccxtpro.bingx({'newUpdates': True})
+    ordinary.set_markets(list(exchange.markets.values()))
+    ordinary_client = ordinary.client('wss://example.invalid')
+    result = ordinary_client.future('swap:order')
+    ordinary.handle_message(ordinary_client, {'e': 'ORDER_TRADE_UPDATE', 'E': 1001, 'o': raw})
+    assert await result is ordinary.orders
+    assert not ordinary_client.message_queue_enabled('swap:order')
+    await ordinary.close()
+
+
 if __name__ == '__main__':
     asyncio.run(test_message_queue())
     asyncio.run(test_private_stream_batches())
     asyncio.run(test_message_queue_lifecycle())
+    asyncio.run(test_bingx_private_batches())
+    asyncio.run(test_bingx_private_batches(str))

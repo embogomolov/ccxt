@@ -1041,7 +1041,8 @@ export default class bingx extends bingxRest {
             'id': uuid,
         };
         const orders = await this.watch (url, messageHash, request, subscriptionHash, subscription);
-        if (this.newUpdates) {
+        const queueHashes = this.safeList (this.safeDict (this.options, 'ws', {}), 'messageQueueHashes', []);
+        if (this.newUpdates && !this.inArray (messageHash, queueHashes)) {
             limit = orders.getLimit (symbol, limit);
         }
         return this.filterBySymbolSinceLimit (orders, symbol, since, limit, true);
@@ -1106,7 +1107,8 @@ export default class bingx extends bingxRest {
             'id': uuid,
         };
         const trades = await this.watch (url, messageHash, request, subscriptionHash, subscription);
-        if (this.newUpdates) {
+        const queueHashes = this.safeList (this.safeDict (this.options, 'ws', {}), 'messageQueueHashes', []);
+        if (this.newUpdates && !this.inArray (messageHash, queueHashes)) {
             limit = trades.getLimit (symbol, limit);
         }
         return this.filterBySymbolSinceLimit (trades, symbol, since, limit, true);
@@ -1640,7 +1642,10 @@ export default class bingx extends bingxRest {
         const spotHash = 'spot:order';
         const swapHash = 'swap:order';
         const messageHash = (isSpot) ? spotHash : swapHash;
-        client.resolve (stored, messageHash);
+        const queueHashes = this.safeList (this.safeDict (this.options, 'ws', {}), 'messageQueueHashes', []);
+        const queued = this.newUpdates && this.inArray (messageHash, queueHashes);
+        const resolvedOrders = queued ? [ parsedOrder ] : stored;
+        client.resolve (resolvedOrders, messageHash);
         client.resolve (stored, messageHash + ':' + symbol);
     }
 
@@ -1726,7 +1731,10 @@ export default class bingx extends bingxRest {
         const swapHash = 'swap:mytrades';
         const messageHash = isSpot ? spotHash : swapHash;
         cachedTrades.append (parsed);
-        client.resolve (cachedTrades, messageHash);
+        const queueHashes = this.safeList (this.safeDict (this.options, 'ws', {}), 'messageQueueHashes', []);
+        const queued = this.newUpdates && this.inArray (messageHash, queueHashes);
+        const resolvedTrades = queued ? [ parsed ] : cachedTrades;
+        client.resolve (resolvedTrades, messageHash);
         client.resolve (cachedTrades, messageHash + ':' + symbol);
     }
 
