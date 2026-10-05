@@ -1120,7 +1120,7 @@ export default class bingx extends Exchange {
             contractSize = (checkIsInverse) ? inverseContractSize : this.parseNumber ('1');
         }
         let isActive = false;
-        if ((this.safeString (market, 'apiStateOpen') === 'true') && (this.safeString (market, 'apiStateClose') === 'true')) {
+        if ((this.safeString (market, 'apiStateOpen') === 'true') && (this.safeString (market, 'apiStateClose') === 'true') && (this.safeString (market, 'status') === '1')) {
             isActive = true; // swap active
         } else if ((this.safeBool (market, 'apiStateSell', false)) && (this.safeBool (market, 'apiStateBuy', false)) && (this.safeString (market, 'status') === '1')) {
             isActive = true; // spot active
