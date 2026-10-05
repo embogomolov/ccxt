@@ -5271,6 +5271,212 @@
                 }
             }
         ],
+        "fetchPosition": [
+            {
+                "description": "Получение активной позиции",
+                "method": "fetchPosition",
+                "input": [
+                    "LTC/USDT:USDT"
+                ],
+                "httpResponse": {
+                    "code": "0",
+                    "msg": "",
+                    "data": [
+                        {
+                            "positionId": "1773289330136281088",
+                            "symbol": "LTC-USDT",
+                            "currency": "USDT",
+                            "positionAmt": "0.1",
+                            "availableAmt": "0.1",
+                            "positionSide": "LONG",
+                            "isolated": false,
+                            "avgPrice": "95.61",
+                            "initialMargin": "1.9128",
+                            "leverage": "5",
+                            "unrealizedProfit": "0.0005",
+                            "realisedProfit": "-0.0048",
+                            "liquidationPrice": "0",
+                            "pnlRatio": "0.0002",
+                            "maxMarginReduction": "0.0000",
+                            "riskRate": "0.0068",
+                            "markPrice": "95.62",
+                            "positionValue": "9.5616",
+                            "onlyOnePosition": false
+                        }
+                    ]
+                },
+                "parsedResponse": {
+                    "info": {
+                        "positionId": "1773289330136281088",
+                        "symbol": "LTC-USDT",
+                        "currency": "USDT",
+                        "positionAmt": "0.1",
+                        "availableAmt": "0.1",
+                        "positionSide": "LONG",
+                        "isolated": false,
+                        "avgPrice": "95.61",
+                        "initialMargin": "1.9128",
+                        "leverage": "5",
+                        "unrealizedProfit": "0.0005",
+                        "realisedProfit": "-0.0048",
+                        "liquidationPrice": "0",
+                        "pnlRatio": "0.0002",
+                        "maxMarginReduction": "0.0000",
+                        "riskRate": "0.0068",
+                        "markPrice": "95.62",
+                        "positionValue": "9.5616",
+                        "onlyOnePosition": false
+                    },
+                    "id": "1773289330136281088",
+                    "symbol": "LTC/USDT:USDT",
+                    "notional": 9.5616,
+                    "marginMode": "cross",
+                    "liquidationPrice": null,
+                    "entryPrice": 95.61,
+                    "unrealizedPnl": 0.0005,
+                    "realizedPnl": -0.0048,
+                    "percentage": 0.02,
+                    "contracts": 0.1,
+                    "contractSize": 1,
+                    "markPrice": 95.62,
+                    "lastPrice": null,
+                    "side": "long",
+                    "hedged": null,
+                    "timestamp": null,
+                    "datetime": null,
+                    "lastUpdateTimestamp": null,
+                    "maintenanceMargin": null,
+                    "maintenanceMarginPercentage": null,
+                    "collateral": null,
+                    "initialMargin": 1.9128,
+                    "initialMarginPercentage": null,
+                    "leverage": 5,
+                    "marginRatio": null,
+                    "stopLossPrice": null,
+                    "takeProfitPrice": null
+                }
+            },
+            {
+                "description": "Пустой ответ подтверждает отсутствие позиции",
+                "method": "fetchPosition",
+                "input": [
+                    "LTC/USDT:USDT"
+                ],
+                "httpResponse": {
+                    "code": 0,
+                    "msg": "",
+                    "data": []
+                },
+                "parsedResponse": {
+                    "info": {
+                        "code": 0,
+                        "msg": "",
+                        "data": []
+                    },
+                    "symbol": "LTC/USDT:USDT",
+                    "contracts": 0,
+                    "contractSize": 1
+                }
+            },
+            {
+                "description": "Получение активной позиции",
+                "method": "fetchPosition",
+                "input": [
+                    "SOL/USD:SOL"
+                ],
+                "httpResponse": {
+                    "code": "0",
+                    "msg": "",
+                    "data": [
+                        {
+                            "symbol": "SOL-USD",
+                            "positionId": "1813080351385337856",
+                            "positionSide": "LONG",
+                            "isolated": false,
+                            "positionAmt": "1",
+                            "availableAmt": "1",
+                            "unrealizedProfit": "-0.00009074",
+                            "initialMargin": "0.00630398",
+                            "liquidationPrice": 23.968303426677032,
+                            "avgPrice": "158.63",
+                            "leverage": 10,
+                            "markPrice": "158.402",
+                            "riskRate": "0.00123783",
+                            "maxMarginReduction": "0",
+                            "updateTime": 1721107015848
+                        }
+                    ]
+                },
+                "parsedResponse": {
+                    "info": {
+                        "symbol": "SOL-USD",
+                        "positionId": "1813080351385337856",
+                        "positionSide": "LONG",
+                        "isolated": false,
+                        "positionAmt": "1",
+                        "availableAmt": "1",
+                        "unrealizedProfit": "-0.00009074",
+                        "initialMargin": "0.00630398",
+                        "liquidationPrice": 23.968303426677032,
+                        "avgPrice": "158.63",
+                        "leverage": 10,
+                        "markPrice": "158.402",
+                        "riskRate": "0.00123783",
+                        "maxMarginReduction": "0",
+                        "updateTime": 1721107015848
+                    },
+                    "id": "1813080351385337856",
+                    "symbol": "SOL/USD:SOL",
+                    "notional": null,
+                    "marginMode": "cross",
+                    "liquidationPrice": 23.968303426677032,
+                    "entryPrice": 158.63,
+                    "unrealizedPnl": -9.074e-05,
+                    "realizedPnl": null,
+                    "percentage": -1.43,
+                    "contracts": 1,
+                    "contractSize": 10,
+                    "markPrice": 158.402,
+                    "lastPrice": null,
+                    "side": "long",
+                    "hedged": null,
+                    "timestamp": null,
+                    "datetime": null,
+                    "lastUpdateTimestamp": 1721107015848,
+                    "maintenanceMargin": null,
+                    "maintenanceMarginPercentage": null,
+                    "collateral": null,
+                    "initialMargin": 0.00630398,
+                    "initialMarginPercentage": null,
+                    "leverage": 10,
+                    "marginRatio": null,
+                    "stopLossPrice": null,
+                    "takeProfitPrice": null
+                }
+            },
+            {
+                "description": "Пустой ответ подтверждает отсутствие позиции",
+                "method": "fetchPosition",
+                "input": [
+                    "SOL/USD:SOL"
+                ],
+                "httpResponse": {
+                    "code": 0,
+                    "msg": "",
+                    "data": []
+                },
+                "parsedResponse": {
+                    "info": {
+                        "code": 0,
+                        "msg": "",
+                        "data": []
+                    },
+                    "symbol": "SOL/USD:SOL",
+                    "contracts": 0,
+                    "contractSize": 10
+                }
+            }
+        ],
         "fetchPositions": [
             {
                 "description": "fetch position",

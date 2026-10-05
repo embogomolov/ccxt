@@ -15,6 +15,7 @@ import testThrottlerPerformance from './test.throttlerPerformance.js';
 import testOnJsonResponse from './test.onJsonResponse.js';
 import testBingxTestOrder from './test.bingxTestOrder.js';
 import testBingxHistory from './test.bingxHistory.js';
+import testBingxPosition from './test.bingxPosition.js';
 import testFetchTradesDiagnostics from './test.fetchTradesDiagnostics.js';
 // todo: import testConfig from './test.config.js';
 // import './test.time.js' :todo
@@ -31,6 +32,7 @@ async function testLanguageSpecific () {
     testOnJsonResponse ();
     await testBingxTestOrder ();
     await testBingxHistory ();
+    await testBingxPosition ();
     await testFetchTradesDiagnostics ();
     await testThrottlerPerformance ();
     // testConfig ();
