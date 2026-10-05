@@ -3,6 +3,131 @@
     "skipKeys": [ "tranId", "timestamp", "id" ],
     "options": {},
     "methods": {
+        "fetchSwapMarkets": [
+            {
+                "description": "close-only linear contract remains inactive despite enabled API flags",
+                "method": "fetchSwapMarkets",
+                "input": [
+                    {}
+                ],
+                "httpResponse": {
+                    "code": 0,
+                    "msg": "",
+                    "data": [
+                        {
+                            "contractId": "133012",
+                            "symbol": "NCCOZINC2USD-USDT",
+                            "size": "0.0001",
+                            "quantityPrecision": 4,
+                            "pricePrecision": 2,
+                            "feeRate": 0.0005,
+                            "makerFeeRate": 0.0002,
+                            "takerFeeRate": 0.0005,
+                            "tradeMinLimit": 0,
+                            "tradeMinQuantity": 0.0006,
+                            "tradeMinUSDT": 2,
+                            "currency": "USDT",
+                            "asset": "NCCOZINC2USD",
+                            "status": 25,
+                            "apiStateOpen": "true",
+                            "apiStateClose": "true",
+                            "ensureTrigger": false,
+                            "triggerFeeRate": "0.00050000",
+                            "brokerState": false,
+                            "launchTime": 1765362000000,
+                            "maintainTime": 0,
+                            "offTime": 0,
+                            "displayName": "Zinc(XZN)-USDT"
+                        }
+                    ]
+                },
+                "parsedResponse": [
+                    {
+                        "id": "NCCOZINC2USD-USDT",
+                        "lowercaseId": null,
+                        "symbol": "NCCOZINC2USD/USDT:USDT",
+                        "base": "NCCOZINC2USD",
+                        "quote": "USDT",
+                        "settle": "USDT",
+                        "baseId": "NCCOZINC2USD",
+                        "quoteId": "USDT",
+                        "settleId": "USDT",
+                        "type": "swap",
+                        "spot": false,
+                        "margin": false,
+                        "swap": true,
+                        "future": false,
+                        "option": false,
+                        "index": null,
+                        "active": false,
+                        "contract": true,
+                        "linear": true,
+                        "inverse": false,
+                        "subType": null,
+                        "taker": 0.0005,
+                        "maker": 0.0002,
+                        "contractSize": 1,
+                        "expiry": null,
+                        "expiryDatetime": null,
+                        "strike": null,
+                        "optionType": null,
+                        "precision": {
+                            "amount": 0.0001,
+                            "price": 0.01
+                        },
+                        "limits": {
+                            "leverage": {
+                                "min": null,
+                                "max": null
+                            },
+                            "amount": {
+                                "min": 0.0006,
+                                "max": null
+                            },
+                            "price": {
+                                "min": null,
+                                "max": null
+                            },
+                            "cost": {
+                                "min": 2,
+                                "max": null
+                            }
+                        },
+                        "marginModes": {
+                            "cross": null,
+                            "isolated": null
+                        },
+                        "created": null,
+                        "info": {
+                            "contractId": "133012",
+                            "symbol": "NCCOZINC2USD-USDT",
+                            "size": "0.0001",
+                            "quantityPrecision": 4,
+                            "pricePrecision": 2,
+                            "feeRate": 0.0005,
+                            "makerFeeRate": 0.0002,
+                            "takerFeeRate": 0.0005,
+                            "tradeMinLimit": 0,
+                            "tradeMinQuantity": 0.0006,
+                            "tradeMinUSDT": 2,
+                            "currency": "USDT",
+                            "asset": "NCCOZINC2USD",
+                            "status": 25,
+                            "apiStateOpen": "true",
+                            "apiStateClose": "true",
+                            "ensureTrigger": false,
+                            "triggerFeeRate": "0.00050000",
+                            "brokerState": false,
+                            "launchTime": 1765362000000,
+                            "maintainTime": 0,
+                            "offTime": 0,
+                            "displayName": "Zinc(XZN)-USDT"
+                        },
+                        "feeSide": "quote"
+                    }
+                ]
+            }
+        ],
         "fetchInverseSwapMarkets": [
             {
                 "description": "active Coin-M contract metadata",

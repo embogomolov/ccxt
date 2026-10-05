@@ -1094,7 +1094,7 @@ class bingx(Exchange, ImplicitAPI):
         if swap:
             contractSize = inverseContractSize if (checkIsInverse) else self.parse_number('1')
         isActive = False
-        if (self.safe_string(market, 'apiStateOpen') == 'true') and (self.safe_string(market, 'apiStateClose') == 'true'):
+        if (self.safe_string(market, 'apiStateOpen') == 'true') and (self.safe_string(market, 'apiStateClose') == 'true') and (self.safe_string(market, 'status') == '1'):
             isActive = True  # swap active
         elif (self.safe_bool(market, 'apiStateSell') is True) and (self.safe_bool(market, 'apiStateBuy') is True) and (self.safe_string(market, 'status') == '1'):
             isActive = True  # spot active
