@@ -981,7 +981,8 @@ class bingx(ccxt.async_support.bingx):
             'id': uuid,
         }
         orders = await self.watch(url, messageHash, request, subscriptionHash, subscription)
-        if self.newUpdates:
+        queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
+        if self.newUpdates and not self.in_array(messageHash, queueHashes):
             limit = orders.getLimit(symbol, limit)
         return self.filter_by_symbol_since_limit(orders, symbol, since, limit, True)
 
@@ -1039,7 +1040,8 @@ class bingx(ccxt.async_support.bingx):
             'id': uuid,
         }
         trades = await self.watch(url, messageHash, request, subscriptionHash, subscription)
-        if self.newUpdates:
+        queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
+        if self.newUpdates and not self.in_array(messageHash, queueHashes):
             limit = trades.getLimit(symbol, limit)
         return self.filter_by_symbol_since_limit(trades, symbol, since, limit, True)
 
@@ -1507,12 +1509,18 @@ class bingx(ccxt.async_support.bingx):
             self.orders = ArrayCacheBySymbolById(limit)
         stored = self.orders
         parsedOrder = self.parse_order(data)
+        timestamp = self.safe_integer(message, 'E')
+        if timestamp is not None:
+            parsedOrder['lastUpdateTimestamp'] = timestamp
         stored.append(parsedOrder)
         symbol = parsedOrder['symbol']
         spotHash = 'spot:order'
         swapHash = 'swap:order'
         messageHash = spotHash if (isSpot) else swapHash
-        client.resolve(stored, messageHash)
+        queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
+        queued = self.newUpdates and self.in_array(messageHash, queueHashes)
+        resolvedOrders = [parsedOrder] if queued else stored
+        client.resolve(resolvedOrders, messageHash)
         client.resolve(stored, messageHash + ':' + symbol)
 
     def handle_my_trades(self, client: Client, message: object):
@@ -1583,12 +1591,22 @@ class bingx(ccxt.async_support.bingx):
         marketId = self.safe_string(result, 's')
         market = self.safe_market(marketId, None, '-', type)
         parsed = self.parse_trade(result, market)
+        if not isSpot:
+            parsed['id'] = self.safe_string_2(result, 'td', 't')
+            parsed['amount'] = self.safe_number(result, 'l')
+            parsed['price'] = self.safe_number(result, 'L')
+            parsed['cost'] = self.parse_number(Precise.string_mul(self.safe_string(result, 'l'), self.safe_string(result, 'L')))
+            parsed['timestamp'] = self.safe_integer(parsed, 'timestamp', self.safe_integer(message, 'E'))
+            parsed['datetime'] = self.iso8601(parsed['timestamp'])
         symbol = parsed['symbol']
         spotHash = 'spot:mytrades'
         swapHash = 'swap:mytrades'
         messageHash = spotHash if isSpot else swapHash
         cachedTrades.append(parsed)
-        client.resolve(cachedTrades, messageHash)
+        queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
+        queued = self.newUpdates and self.in_array(messageHash, queueHashes)
+        resolvedTrades = [parsed] if queued else cachedTrades
+        client.resolve(resolvedTrades, messageHash)
         client.resolve(cachedTrades, messageHash + ':' + symbol)
 
     def handle_balance(self, client: Client, message: object):
@@ -1685,11 +1703,17 @@ class bingx(ccxt.async_support.bingx):
             self.handle_positions(client, message)
         if e == 'ORDER_TRADE_UPDATE':
             self.handle_order(client, message)
-            data = self.safe_value(message, 'o', {})
-            type = self.safe_string(data, 'x')
-            status = self.safe_string(data, 'X')
-            if (type == 'TRADE') and (status == 'FILLED'):
+            data = self.safe_dict(message, 'o', {})
+            tradeId = self.safe_string_2(data, 'td', 't')
+            if (self.safe_string(data, 'x') == 'TRADE') and (tradeId is not None) and (tradeId != '0'):
                 self.handle_my_trades(client, message)
+        if e == 'TRADE_UPDATE':
+            self.handle_order(client, message)
+            self.handle_my_trades(client, message)
+        if e == 'listenKeyExpired':
+            self.options['listenKey'] = None
+            self.options['lastAuthenticatedTime'] = 0
+            client.reject(NetworkError(self.id + ' private listen key expired'))
         msgData = self.safe_value(message, 'data')
         msgEvent = self.safe_string(msgData, 'e')
         if msgEvent == '24hTicker':
