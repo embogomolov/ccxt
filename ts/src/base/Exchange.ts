@@ -6450,6 +6450,20 @@ export class BaseExchange {
         }
         let retries = 0;
         [ retries, params ] = this.handleOptionAndParams (params, path, 'maxRetriesOnFailure', retries);
+        if ('maxRetriesOnFailureMethods' in this.options) {
+            const retryMethods = this.options['maxRetriesOnFailureMethods'];
+            if (!Array.isArray (retryMethods)) {
+                throw new BadRequest (this.id + ' maxRetriesOnFailureMethods must be an array of HTTP methods');
+            }
+            for (let index = 0; index < retryMethods.length; index++) {
+                if (typeof retryMethods[index] !== 'string') {
+                    throw new BadRequest (this.id + ' maxRetriesOnFailureMethods must contain strings');
+                }
+            }
+            if (!this.inArray (method, retryMethods)) {
+                retries = 0;
+            }
+        }
         let retryDelay = 0;
         [ retryDelay, params ] = this.handleOptionAndParams (params, path, 'maxRetriesOnFailureDelay', retryDelay);
         const fetchDataCacheEnabled = this.fetchHistoryCacheSize > 0;

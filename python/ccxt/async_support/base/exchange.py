@@ -1003,6 +1003,15 @@ class BaseExchange(SyncExchange):
             await self.throttle(cost)
         retries = 0
         retries, params = self.handle_option_and_params(params, path, 'maxRetriesOnFailure', retries)
+        if 'maxRetriesOnFailureMethods' in self.options:
+            retryMethods = self.options['maxRetriesOnFailureMethods']
+            if not isinstance(retryMethods, list):
+                raise BadRequest(self.id + ' maxRetriesOnFailureMethods must be an array of HTTP methods')
+            for index in range(0, len(retryMethods)):
+                if not isinstance(retryMethods[index], str):
+                    raise BadRequest(self.id + ' maxRetriesOnFailureMethods must contain strings')
+            if not self.in_array(method, retryMethods):
+                retries = 0
         retryDelay = 0
         retryDelay, params = self.handle_option_and_params(params, path, 'maxRetriesOnFailureDelay', retryDelay)
         fetchDataCacheEnabled = self.fetchHistoryCacheSize > 0
