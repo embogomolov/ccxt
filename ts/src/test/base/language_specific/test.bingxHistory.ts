@@ -7,6 +7,9 @@ import ccxt from '../../../../ccxt.js';
 async function testBingxHistory () {
     const exchange = new ccxt.bingx ();
     for (const [ code, msg, errorType ] of [
+        [ 100410, 'Please try again later.', ccxt.RateLimitExceeded ],
+        [ 100410, 'The current system is busy, please try again later', ccxt.RateLimitExceeded ],
+        [ 100500, 'The current system is busy, please try again later', ccxt.OperationFailed ],
         [ 109400, 'invalid quantity', ccxt.BadRequest ],
         [ 109400, 'order not exist', ccxt.OrderNotFound ],
         [ 109421, 'order not exist', ccxt.OrderNotFound ],
