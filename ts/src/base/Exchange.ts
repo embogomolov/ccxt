@@ -6740,7 +6740,21 @@ export class BaseExchange {
         const retries = 0;
         // implicit endpoints may pass a list body as params: keep it an untyped box
         const requestParams: object = params;
-        const [ retriesMaxRetriesOnFailure, paramsMaxRetriesOnFailure ] = this.handleOptionIntegerAndParams (requestParams, path, 'maxRetriesOnFailure', retries);
+        let [ retriesMaxRetriesOnFailure, paramsMaxRetriesOnFailure ] = this.handleOptionIntegerAndParams (requestParams, path, 'maxRetriesOnFailure', retries);
+        if ('maxRetriesOnFailureMethods' in this.options) {
+            const retryMethods = this.options['maxRetriesOnFailureMethods'];
+            if (!Array.isArray (retryMethods)) {
+                throw new BadRequest (this.id + ' maxRetriesOnFailureMethods must be an array of HTTP methods');
+            }
+            for (let index = 0; index < retryMethods.length; index++) {
+                if (typeof retryMethods[index] !== 'string') {
+                    throw new BadRequest (this.id + ' maxRetriesOnFailureMethods must contain strings');
+                }
+            }
+            if (!this.inArray (method, retryMethods)) {
+                retriesMaxRetriesOnFailure = 0;
+            }
+        }
         const retryDelay = 0;
         const [ retryDelayMaxRetriesOnFailureDelay, paramsMaxRetriesOnFailureDelay ] = this.handleOptionIntegerAndParams (paramsMaxRetriesOnFailure, path, 'maxRetriesOnFailureDelay', retryDelay);
         const fetchDataCacheEnabled = this.fetchHistoryCacheSize > 0;

@@ -1010,6 +1010,15 @@ class BaseExchange(SyncExchange):
         # implicit endpoints may pass a list body as params: keep it an untyped box
         requestParams = params
         retriesMaxRetriesOnFailure, paramsMaxRetriesOnFailure = self.handle_option_integer_and_params(requestParams, path, 'maxRetriesOnFailure', retries)
+        if 'maxRetriesOnFailureMethods' in self.options:
+            retryMethods = self.options['maxRetriesOnFailureMethods']
+            if not isinstance(retryMethods, list):
+                raise BadRequest(self.id + ' maxRetriesOnFailureMethods must be an array of HTTP methods')
+            for index in range(0, len(retryMethods)):
+                if not isinstance(retryMethods[index], str):
+                    raise BadRequest(self.id + ' maxRetriesOnFailureMethods must contain strings')
+            if not self.in_array(method, retryMethods):
+                retriesMaxRetriesOnFailure = 0
         retryDelay = 0
         retryDelayMaxRetriesOnFailureDelay, paramsMaxRetriesOnFailureDelay = self.handle_option_integer_and_params(paramsMaxRetriesOnFailure, path, 'maxRetriesOnFailureDelay', retryDelay)
         fetchDataCacheEnabled = self.fetchHistoryCacheSize > 0
