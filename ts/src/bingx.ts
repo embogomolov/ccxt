@@ -1957,6 +1957,8 @@ export default class bingx extends Exchange {
      * @param {object} [params] extra parameters specific to the exchange API endpoint
      * @param {string} [params.subType] 'linear' or 'inverse' (default is 'linear'), 'inverse' is not supported
      * @param {int} [params.until] timestamp in ms of the latest funding to fetch
+     * @param {boolean} [params.paginate] разбивает насыщенные интервалы; требует since; не гарантирует серверную глубину хранения
+     * @param {int} [params.paginationCalls] максимальное число запросов; исчерпание вызывает ошибку
      * @returns {object[]} a list of [funding history structures]{@link https://docs.ccxt.com/?id=funding-history-structure}
      */
     override async fetchFundingHistory (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<FundingHistory[]> {
@@ -1972,46 +1974,84 @@ export default class bingx extends Exchange {
         if (isInverse) {
             throw new NotSupported (this.id + ' fetchFundingHistory() is not supported for inverse swap markets');
         }
-        const [ paginate, paramsPaginate ] = this.handleOptionBoolAndParams (paramsSubType, 'fetchFundingHistory', 'paginate', false);
-        if (paginate) {
-            return await this.fetchPaginatedCallDeterministic ('fetchFundingHistory', symbol, since, limit, '24h', paramsPaginate) as FundingHistory[];
+        params = paramsSubType;
+        let paginate = false;
+        [ paginate, params ] = this.handleOptionAndParams (params, 'fetchFundingHistory', 'paginate');
+        const until = this.safeInteger2 (params, 'until', 'endTime', paginate ? this.milliseconds () : undefined);
+        let remainingCalls = undefined;
+        [ remainingCalls, params ] = this.handleOptionAndParams (params, 'fetchFundingHistory', 'paginationCalls', 10);
+        if (paginate && ((since === undefined) || (until === undefined) || (since < 0) || (until < since) || (remainingCalls <= 0))) {
+            throw new ArgumentsRequired (this.id + ' funding history requires since, ordered time bounds and a positive paginationCalls');
         }
-        const request: Dict = {
-            'incomeType': 'FUNDING_FEE',
-        };
-        if (market !== undefined) {
-            request['symbol'] = market['id'];
+        params = this.omit (params, [ 'until', 'endTime', 'startTime', 'limit' ]);
+        const pageSize = paginate ? 1000 : limit;
+        const windows = [ [ since, until ] ];
+        const incomes: Dict = {};
+        while (windows.length > 0) {
+            if (remainingCalls <= 0) {
+                throw new OperationFailed (this.id + ' funding history exceeds paginationCalls');
+            }
+            remainingCalls -= 1;
+            const window = windows.pop () as number[];
+            const windowStart = window[0];
+            const windowEnd = window[1];
+            const request: Dict = { 'incomeType': 'FUNDING_FEE' };
+            if (windowEnd !== undefined) {
+                request['endTime'] = windowEnd;
+            }
+            if (market !== undefined) {
+                request['symbol'] = market['id'];
+            }
+            if (windowStart !== undefined) {
+                request['startTime'] = paginate ? Math.max (0, windowStart - 1) : windowStart;
+            }
+            if (pageSize !== undefined) {
+                request['limit'] = pageSize;
+            }
+            if (paginate) {
+                request['endTime'] = windowEnd + 1;
+            }
+            const response = await this.swapV2PrivateGetUserIncome (this.extend (params, request));
+            const rows = this.safeList (response, 'data');
+            if ((this.safeString (response, 'code') !== '0') || ((rows === undefined) && (response['data'] !== null))) {
+                throw new OperationFailed (this.id + ' funding history response is incomplete');
+            }
+            const data = (rows === undefined) ? [] : rows;
+            if (!paginate) {
+                return this.parseIncomes (data, market, since, limit) as FundingHistory[];
+            }
+            if (data.length >= 1000) {
+                if (windowStart === windowEnd) {
+                    throw new OperationFailed (this.id + ' funding history overflows one timestamp');
+                }
+                const middle = this.parseToInt ((windowStart + windowEnd) / 2);
+                windows.push ([ middle + 1, windowEnd ]);
+                windows.push ([ windowStart, middle ]);
+                continue;
+            }
+            const pageIds: Dict = {};
+            for (let index = 0; index < data.length; index++) {
+                const row = data[index];
+                const income = this.parseIncome (row, market);
+                const incomeId = income['id'];
+                const timestamp = income['timestamp'];
+                if ((incomeId === undefined) || (incomeId === '') || (timestamp === undefined) || (income['amount'] === undefined) || (income['code'] === undefined) || (this.safeString (row, 'incomeType') !== 'FUNDING_FEE') || (incomeId in pageIds)) {
+                    throw new OperationFailed (this.id + ' funding history has invalid identity, timestamp or amount');
+                }
+                if (((market !== undefined) && (income['symbol'] !== symbol)) || (timestamp < windowStart - 1) || (timestamp > windowEnd + 1)) {
+                    throw new OperationFailed (this.id + ' funding history does not match requested bounds');
+                }
+                pageIds[incomeId] = true;
+                if ((timestamp < windowStart) || (timestamp > windowEnd)) {
+                    continue;
+                }
+                if (incomeId in incomes) {
+                    throw new OperationFailed (this.id + ' funding identity has conflicting timestamps');
+                }
+                incomes[incomeId] = income;
+            }
         }
-        if (since !== undefined) {
-            request['startTime'] = since;
-        }
-        if (limit !== undefined) {
-            request['limit'] = limit;
-        }
-        const until = this.safeInteger2 (paramsPaginate, 'until', 'endTime');
-        const paramsUntil = (until !== undefined) ? this.omit (paramsPaginate, [ 'until' ]) : paramsPaginate;
-        if (until !== undefined) {
-            request['endTime'] = until;
-        }
-        const response = await this.swapV2PrivateGetUserIncome (this.extend (request, paramsUntil));
-        //         {
-        //             "code": 0,
-        //             "msg": "",
-        //             "data": [
-        //                 {
-        //                 "symbol": "LDO-USDT",
-        //                 "incomeType": "FUNDING_FEE",
-        //                 "income": "-0.0292",
-        //                 "asset": "USDT",
-        //                 "info": "Funding Fee",
-        //                 "time": 1702713615000,
-        //                 "tranId": "170***6*2_3*9_20***97",
-        //                 "tradeId": "170***6*2_3*9_20***97"
-        //                 }
-        //             ]
-        //         }
-        const data: Dict[] = this.safeList (response, 'data', []);
-        return this.parseIncomes (data, market, since, limit) as FundingHistory[];
+        return this.filterBySinceLimit (this.sortBy (this.toArray (incomes), 'timestamp'), since, limit) as FundingHistory[];
     }
 
     override parseIncome (income: Dict, market: Market = undefined): object {

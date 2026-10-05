@@ -90,6 +90,31 @@ async function testBingxHistory () {
     const history = await exchange.fetchOrders (symbol, timestamp, undefined, { 'until': timestamp + 1000, 'paginate': true });
     assert.strictEqual (history.length, 1001);
     assert.strictEqual (new Set (history.map ((order) => order.id)).size, 1001);
+    const fundingRows = Array.from ({ length: 1001 }, (_, index) => ({
+        'tranId': String (index + 1), 'time': timestamp + index, 'symbol': 'ETH-USDT',
+        'incomeType': 'FUNDING_FEE', 'income': (index % 2 !== 0) ? '-0.1' : '0.1', 'asset': 'USDT',
+    }));
+    for (const inclusiveEnd of [ false, true ]) {
+        exchange.swapV2PrivateGetUserIncome = async (params) => ({
+            'code': 0,
+            'data': fundingRows.filter ((row) => row.time > params.startTime && (inclusiveEnd ? row.time <= params.endTime : row.time < params.endTime)).slice (0, params.limit),
+        });
+        const funding = await exchange.fetchFundingHistory (symbol, timestamp, undefined, { 'endTime': timestamp + 1000, 'paginate': true });
+        assert.strictEqual (funding.length, 1001);
+        assert.strictEqual (new Set (funding.map ((row) => row.id)).size, 1001);
+        assert.strictEqual (funding[0].amount, 0.1);
+        assert.strictEqual (funding[1].amount, -0.1);
+        await assert.rejects (exchange.fetchFundingHistory (symbol, timestamp, undefined, { 'until': timestamp + 1000, 'paginate': true, 'paginationCalls': 1 }), ccxt.OperationFailed);
+    }
+    exchange.swapV2PrivateGetUserIncome = async () => ({ 'code': 0, 'data': fundingRows.slice (0, 1000) });
+    await assert.rejects (exchange.fetchFundingHistory (symbol, timestamp, undefined, { 'until': timestamp, 'paginate': true }), ccxt.OperationFailed);
+    for (const response of [ { 'code': 0 }, { 'code': 0, 'data': {} }, { 'code': 0, 'data': [ { ...fundingRows[0], 'tranId': undefined } ] } ]) {
+        exchange.swapV2PrivateGetUserIncome = async () => response;
+        await assert.rejects (exchange.fetchFundingHistory (symbol, timestamp, undefined, { 'until': timestamp, 'paginate': true }), ccxt.OperationFailed);
+    }
+    exchange.swapV2PrivateGetUserIncome = async () => ({ 'code': 0, 'data': null });
+    assert.deepStrictEqual (await exchange.fetchFundingHistory (symbol, timestamp, undefined, { 'until': timestamp, 'paginate': true }), []);
+    await assert.rejects (exchange.fetchFundingHistory (symbol, undefined, undefined, { 'paginate': true }), ccxt.ArgumentsRequired);
     await exchange.close ();
 }
 
