@@ -23,6 +23,7 @@ from ccxt.base.errors import DuplicateOrderId
 from ccxt.base.errors import NotSupported
 from ccxt.base.errors import OperationFailed
 from ccxt.base.errors import DDoSProtection
+from ccxt.base.errors import RateLimitExceeded
 from ccxt.base.decimal_to_precision import TICK_SIZE
 from ccxt.base.precise import Precise
 
@@ -635,7 +636,7 @@ class bingx(Exchange, ImplicitAPI):
                     '100202': InsufficientFunds,
                     '100204': BadRequest,
                     '100400': BadRequest,
-                    '100410': OperationFailed,  # {"code":100410,"msg":"The current system is busy, please try again later"}
+                    '100410': RateLimitExceeded,
                     '100421': BadSymbol,  # {"code":100421,"msg":"This pair is currently restricted from API trading","debugMsg":""}
                     '100440': ExchangeError,
                     '100500': OperationFailed,  # {"code":100500,"msg":"The current system is busy, please try again later","debugMsg":""}
@@ -651,6 +652,11 @@ class bingx(Exchange, ImplicitAPI):
                     '101204': InsufficientFunds,  # {"code":101204,"msg":"","data":{}}
                     '101205': InvalidOrder,  # {"code":101205,"msg":"No position to close","data":{}}
                     '101400': InvalidOrder,  # {"code":101400,"msg":"The minimum order amount is 0.0001 BTC.","data":{}}
+                    '110402': InvalidOrder,
+                    '110411': InvalidOrder,
+                    '110413': InvalidOrder,
+                    'order not exist': OrderNotFound,
+                    'GetFillOrdersListForApi count db has err:sql: no rows in result set': OperationFailed,
                     '110425': InvalidOrder,  # {"code":110425,"msg":"Please ensure that the minimum nominal value of the order placed must be greater than 2u","data":{}}
                     '100490': BadSymbol,  # spot trading pair is offline
                     '101481': DuplicateOrderId,
@@ -1526,7 +1532,7 @@ class bingx(Exchange, ImplicitAPI):
         #     }
         #
         time = self.safe_integer_n(trade, ['time', 'filledTm', 'T', 'tradeTime'])
-        datetimeId = self.safe_string(trade, 'filledTm')
+        datetimeId = self.safe_string_2(trade, 'filledTime', 'filledTm')
         if datetimeId is not None:
             time = self.parse8601(datetimeId)
         if time == 0:
@@ -1538,7 +1544,7 @@ class bingx(Exchange, ImplicitAPI):
         m = self.safe_bool(trade, 'm')
         marketId = self.safe_string_2(trade, 's', 'symbol')
         isBuyerMaker = self.safe_bool_n(trade, ['buyerMaker', 'isBuyerMaker', 'maker'])
-        takeOrMaker = None
+        takeOrMaker = self.safe_string_lower(trade, 'role')
         isMakerSide = (isBuyerMaker is True) or (m is True)
         if (isBuyerMaker is not None) or (m is not None):
             takeOrMaker = 'maker' if isMakerSide else 'taker'
@@ -1567,7 +1573,7 @@ class bingx(Exchange, ImplicitAPI):
                 amount = lastAmount
                 price = lastPrice
         return self.safe_trade({
-            'id': self.safe_string_n(trade, ['id', 't', 'fillId', 'tradeId']),
+            'id': self.safe_string_n(trade, ['tradeId', 'id', 't', 'fillId']),
             'info': trade,
             'timestamp': time,
             'datetime': self.iso8601(time),
@@ -1580,7 +1586,7 @@ class bingx(Exchange, ImplicitAPI):
             'amount': amount,
             'cost': cost,
             'fee': {
-                'cost': self.parse_number(Precise.string_abs(self.safe_string_2(trade, 'commission', 'n'))),
+                'cost': self.parse_number(Precise.string_neg(self.safe_string_2(trade, 'commission', 'n'))),
                 'currency': currencyCode,
             },
         }, market)
@@ -1890,6 +1896,8 @@ class bingx(Exchange, ImplicitAPI):
         :param dict [params]: extra parameters specific to the exchange API endpoint
         :param str [params.subType]: 'linear' or 'inverse'(default is 'linear'), 'inverse' is not supported
         :param int [params.until]: timestamp in ms of the latest funding to fetch
+        :param boolean [params.paginate]: разбивает насыщенные интервалы; требует since; не гарантирует серверную глубину хранения
+        :param int [params.paginationCalls]: максимальное число запросов; исчерпание вызывает ошибку
         :returns dict[]: a list of `funding history structures <https://docs.ccxt.com/?id=funding-history-structure>`
         """
         if self.markets is None:
@@ -1901,41 +1909,67 @@ class bingx(Exchange, ImplicitAPI):
         isInverse = (market['inverse'] is True) if (market is not None) else (subType == 'inverse')
         if isInverse:
             raise NotSupported(self.id + ' fetchFundingHistory() is not supported for inverse swap markets')
-        paginate, paramsPaginate = self.handle_option_bool_and_params(paramsSubType, 'fetchFundingHistory', 'paginate', False)
-        if paginate:
-            return await self.fetch_paginated_call_deterministic('fetchFundingHistory', symbol, since, limit, '24h', paramsPaginate)
-        request = {
-            'incomeType': 'FUNDING_FEE',
-        }
-        if market is not None:
-            request['symbol'] = market['id']
-        if since is not None:
-            request['startTime'] = since
-        if limit is not None:
-            request['limit'] = limit
-        until = self.safe_integer_2(paramsPaginate, 'until', 'endTime')
-        paramsUntil = self.omit(paramsPaginate, ['until']) if (until is not None) else paramsPaginate
-        if until is not None:
-            request['endTime'] = until
-        response = await self.swapV2PrivateGetUserIncome(self.extend(request, paramsUntil))
-        #         {
-        #             "code": 0,
-        #             "msg": "",
-        #             "data": [
-        #                 {
-        #                 "symbol": "LDO-USDT",
-        #                 "incomeType": "FUNDING_FEE",
-        #                 "income": "-0.0292",
-        #                 "asset": "USDT",
-        #                 "info": "Funding Fee",
-        #                 "time": 1702713615000,
-        #                 "tranId": "170***6*2_3*9_20***97",
-        #                 "tradeId": "170***6*2_3*9_20***97"
-        #                 }
-        #             ]
-        #         }
-        data = self.safe_list(response, 'data', [])
-        return self.parse_incomes(data, market, since, limit)
+        params = paramsSubType
+        paginate = False
+        paginate, params = self.handle_option_and_params(params, 'fetchFundingHistory', 'paginate')
+        until = self.safe_integer_2(params, 'until', 'endTime', self.milliseconds() if paginate else None)
+        remainingCalls = None
+        remainingCalls, params = self.handle_option_and_params(params, 'fetchFundingHistory', 'paginationCalls', 10)
+        if paginate and ((since is None) or (until is None) or (since < 0) or (until < since) or (remainingCalls <= 0)):
+            raise ArgumentsRequired(self.id + ' funding history requires since, ordered time bounds and a positive paginationCalls')
+        params = self.omit(params, ['until', 'endTime', 'startTime', 'limit'])
+        pageSize = 1000 if paginate else limit
+        windows = [[since, until]]
+        incomes = {}
+        while(len(windows) > 0):
+            if remainingCalls <= 0:
+                raise OperationFailed(self.id + ' funding history exceeds paginationCalls')
+            remainingCalls -= 1
+            window = windows.pop()
+            windowStart = window[0]
+            windowEnd = window[1]
+            request = {'incomeType': 'FUNDING_FEE'}
+            if windowEnd is not None:
+                request['endTime'] = windowEnd
+            if market is not None:
+                request['symbol'] = market['id']
+            if windowStart is not None:
+                request['startTime'] = max(0, windowStart - 1) if paginate else windowStart
+            if pageSize is not None:
+                request['limit'] = pageSize
+            if paginate:
+                request['endTime'] = windowEnd + 1
+            response = await self.swapV2PrivateGetUserIncome(self.extend(params, request))
+            rows = self.safe_list(response, 'data')
+            if (self.safe_string(response, 'code') != '0') or not ('data' in response) or ((rows is None) and (response['data'] is not None)):
+                raise OperationFailed(self.id + ' funding history response is incomplete')
+            data = [] if (rows is None) else rows
+            if not paginate:
+                return self.parse_incomes(data, market, since, limit)
+            if len(data) >= 1000:
+                if windowStart == windowEnd:
+                    raise OperationFailed(self.id + ' funding history overflows one timestamp')
+                middle = self.parse_to_int((windowStart + windowEnd) / 2)
+                windows.append([middle + 1, windowEnd])
+                windows.append([windowStart, middle])
+                continue
+            pageIds = {}
+            for index in range(0, len(data)):
+                row = data[index]
+                income = self.parse_income(row, market)
+                incomeId = income['id']
+                timestamp = income['timestamp']
+                if (incomeId is None) or (incomeId == '') or (timestamp is None) or (income['amount'] is None) or (income['code'] is None) or (self.safe_string(row, 'incomeType') != 'FUNDING_FEE') or (incomeId in pageIds):
+                    raise OperationFailed(self.id + ' funding history has invalid identity, timestamp or amount')
+                if ((market is not None) and (income['symbol'] != symbol)) or (timestamp < windowStart - 1) or (timestamp > windowEnd + 1):
+                    raise OperationFailed(self.id + ' funding history does not match requested bounds')
+                pageIds[incomeId] = True
+                if (timestamp < windowStart) or (timestamp > windowEnd):
+                    continue
+                if incomeId in incomes:
+                    raise OperationFailed(self.id + ' funding identity has conflicting timestamps')
+                incomes[incomeId] = income
+        return self.filter_by_since_limit(self.sort_by(self.to_array(incomes), 'timestamp'), since, limit)
 
     def parse_income(self, income: dict, market: Market = None) -> object:
         # {
@@ -2645,6 +2679,7 @@ class bingx(Exchange, ImplicitAPI):
         spotData = self.safe_dict(response, 'data', {})
         spotBalances = self.safe_list_2(spotData, 'balances', 'assets', [])
         if isContract:
+            currencyIds = {}
             for i in range(0, len(contractBalances)):
                 balance = self.safe_dict(contractBalances, i)
                 currencyId = self.safe_string(balance, 'asset')
@@ -2656,6 +2691,10 @@ class bingx(Exchange, ImplicitAPI):
                 account['used'] = self.safe_string(balance, 'usedMargin')
                 account['total'] = self.safe_string_2(balance, 'balance', 'maxWithdrawAmount')
                 if code is not None:
+                    previousCurrencyId = self.safe_string(currencyIds, code)
+                    if (previousCurrencyId is not None) and (previousCurrencyId != currencyId):
+                        raise OperationFailed(self.id + ' balance contains conflicting currency aliases: ' + previousCurrencyId + ', ' + currencyId + ' -> ' + code)
+                    currencyIds[code] = currencyId
                     result[code] = account
         else:
             for i in range(0, len(spotBalances)):
@@ -2903,8 +2942,18 @@ class bingx(Exchange, ImplicitAPI):
             #         ]
             #     }
             #
-        data = self.safe_list(response, 'data', [])
-        first = self.safe_dict(data, 0, {})
+        data = self.safe_list(response, 'data')
+        if data is None:
+            raise ExchangeError(self.id + ' fetchPosition() requires a positions list')
+        if len(data) == 0:
+            return self.safe_position({
+                'info': response,
+                'symbol': market['symbol'],
+                'contracts': 0,
+            })
+        first = self.safe_dict(data, 0)
+        if (first is None) or (self.safe_string(first, 'symbol') != market['id']) or (self.safe_number(first, 'positionAmt') is None):
+            raise ExchangeError(self.id + ' fetchPosition() requires a matching position with positionAmt')
         return self.parse_position(first, market)
 
     def parse_position(self, position: dict, market: Market = None) -> Position:
@@ -3869,6 +3918,7 @@ class bingx(Exchange, ImplicitAPI):
         if len(transactTime) == 10:
             # spot conditional orders are created with transactTime in seconds
             timestamp = self.safe_timestamp(orderData, 'transactTime')
+        closingHedge = (marketResolved['swap'] is True) and (((positionSide == 'LONG') and (side == 'sell')) or ((positionSide == 'SHORT') and (side == 'buy')))
         lastTradeTimestamp = self.safe_integer_2(orderData, 'updateTime', 'T')
         statusId = self.safe_string_upper_n(orderData, ['status', 'X', 'orderStatus'])
         feeCurrencyCode = self.safe_string_2(orderData, 'feeAsset', 'N')
@@ -3941,7 +3991,7 @@ class bingx(Exchange, ImplicitAPI):
                 'cost': self.parse_number(Precise.string_abs(feeCost)),
             },
             'trades': None,
-            'reduceOnly': self.safe_bool_2(orderData, 'reduceOnly', 'ro'),
+            'reduceOnly': True if closingHedge else self.safe_bool_2(orderData, 'reduceOnly', 'ro'),
         }, marketResolved)
 
     def parse_order_status(self, status: Str) -> Str:
@@ -4606,6 +4656,55 @@ class bingx(Exchange, ImplicitAPI):
         order = self.safe_dict(data, 'order', data)
         return self.parse_order(order, market)
 
+    async def fetch_paginated_orders(self, symbol: Str, since: Int, limit: Int, params: dict) -> list[Order]:
+        """
+ @ignore
+        получает страницы истории ордеров в семидневных окнах без потери одинаковых clientOrderId
+        """
+        until = self.safe_integer_2(params, 'until', 'endTime', self.milliseconds())
+        if (since is None) or (since < 0) or (until < since):
+            raise ArgumentsRequired(self.id + ' paginated orders require since <= until')
+        remainingCalls = None
+        remainingCalls, params = self.handle_option_and_params(params, 'fetchOrders', 'paginationCalls', 10)
+        params = self.omit(params, ['until', 'endTime', 'orderId', 'limit', 'startTime'])
+        market = None if (symbol is None) else self.market(symbol)
+        records = {}
+        windowStart = since
+        cursor = '0'
+        while(windowStart <= until):
+            if remainingCalls <= 0:
+                raise OperationFailed(self.id + ' order history exceeds paginationCalls')
+            remainingCalls -= 1
+            windowEnd = min(until, windowStart + 7 * 86400000 - 2)
+            request = {
+                'startTime': max(0, windowStart - 1), 'endTime': windowEnd + 1,
+                'orderId': cursor, 'limit': 1000,
+            }
+            if market is not None:
+                request['symbol'] = market['id']
+            response = await self.swapV2PrivateGetTradeAllOrders(self.extend(params, request))
+            data = self.safe_dict(response, 'data', {})
+            rows = self.safe_list(data, 'orders')
+            if (self.safe_string(response, 'code') != '0') or (rows is None):
+                raise OperationFailed(self.id + ' order history response is incomplete')
+            nextCursor = cursor
+            pageIds = {}
+            for index in range(0, len(rows)):
+                row = rows[index]
+                orderId = self.safe_string(row, 'orderId')
+                if (orderId is None) or not Precise.string_gt(orderId, nextCursor) or (self.safe_bool(pageIds, orderId) is True):
+                    raise OperationFailed(self.id + ' order history cursor does not advance')
+                pageIds[orderId] = True
+                if Precise.string_gt(orderId, nextCursor):
+                    nextCursor = orderId
+                records[orderId] = row
+            if len(rows) < 1000:
+                windowStart = windowEnd + 1
+                cursor = '0'
+            else:
+                cursor = nextCursor
+        return self.parse_orders(self.to_array(records), market, None, limit)
+
     async def fetch_orders(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Order]:
         """
         fetches information on multiple orders made by the user
@@ -4619,6 +4718,8 @@ class bingx(Exchange, ImplicitAPI):
         :param dict [params]: extra parameters specific to the exchange API endpoint
         :param int [params.until]: the latest time in ms to fetch entries for
         :param int [params.orderId]: Only return subsequent orders, and return the latest order by default
+        :param boolean [params.paginate]: получает все страницы заданного интервала; неполнота вызывает OperationFailed
+        :param int [params.paginationCalls]: максимальное число запросов истории, по умолчанию 10
         :returns Order[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
         """
         if self.markets is None:
@@ -4634,6 +4735,10 @@ class bingx(Exchange, ImplicitAPI):
             raise NotSupported(self.id + ' fetchOrders() is only supported for swap markets')
         if (subType == 'inverse') or ((market is not None) and (market['inverse'] is True)):
             raise NotSupported(self.id + ' fetchOrders() is not supported for inverse swap markets')
+        paginate = False
+        paginate, params = self.handle_option_and_params(params, 'fetchOrders', 'paginate', False)
+        if paginate:
+            return await self.fetch_paginated_orders(symbol, since, limit, params)
         if limit is not None:
             request['limit'] = limit
         if since is not None:
@@ -5876,8 +5981,9 @@ class bingx(Exchange, ImplicitAPI):
         :param int [limit]: the maximum number of trades structures to retrieve
         :param dict [params]: extra parameters specific to the exchange API endpoint
         :param int [params.until]: timestamp in ms for the ending date filter, default is None
-        :param str params['trandingUnit']: COIN(directly represent assets such and ETH) or CONT(represents the number of contract sheets)
         :param str params['orderId']: the order id required for inverse swap
+        :param boolean [params.paginate]: получает все исполнения заданного интервала; переполнение вызывает OperationFailed
+        :param int [params.paginationCalls]: максимальное число запросов, по умолчанию 10
         :returns dict[]: a list of `trade structures <https://docs.ccxt.com/?id=trade-structure>`
         """
         if symbol is None:
@@ -5890,6 +5996,8 @@ class bingx(Exchange, ImplicitAPI):
         response: dict
         paramsTrades = None
         subType, paramsSubType = self.handle_sub_type_and_params('fetchMyTrades', market, params)
+        if (market['swap'] is True) and (subType != 'inverse'):
+            return await self.fetch_swap_trades(symbol, since, limit, paramsSubType)
         if subType == 'inverse':
             paramsTrades = self.omit(paramsSubType, 'orderId')
             orderId = self.safe_string(paramsSubType, 'orderId')
@@ -6003,6 +6111,74 @@ class bingx(Exchange, ImplicitAPI):
                 #    }
                 #
         return self.parse_trades(fills, market, since, limit, paramsTrades)
+
+    async def fetch_swap_trades(self, symbol: str, since: Int, limit: Int, params: dict) -> list[Trade]:
+        """
+ @ignore
+        получает исполнения с реальными tradeId; насыщенный интервал делится по времени
+        """
+        market = self.market(symbol)
+        now = self.milliseconds()
+        retention = 7 * 86400000
+        since = (now - retention + 1) if (since is None) else since
+        until = self.safe_integer_2(params, 'until', 'endTs', now)
+        if (since < now - retention) or (since < 0) or (until < since):
+            raise ArgumentsRequired(self.id + ' fillHistory requires an ordered interval within the last seven days')
+        paginate = False
+        paginate, params = self.handle_option_and_params(params, 'fetchMyTrades', 'paginate', False)
+        remainingCalls = None
+        remainingCalls, params = self.handle_option_and_params(params, 'fetchMyTrades', 'paginationCalls', 10)
+        params = self.omit(params, ['until', 'endTs', 'startTs', 'pageSize', 'pageIndex', 'lastFillId', 'tradingUnit'])
+        orderId = self.safe_string(params, 'orderId')
+        pageSize = 1000 if paginate else min(self.safe_integer({'limit': limit}, 'limit', 1000), 1000)
+        windows = [[since, until]]
+        trades = {}
+        while(len(windows) > 0):
+            if remainingCalls <= 0:
+                raise OperationFailed(self.id + ' fill history exceeds paginationCalls')
+            remainingCalls -= 1
+            window = windows.pop()
+            windowStart = window[0]
+            windowEnd = window[1]
+            request = {
+                'symbol': market['id'], 'startTs': max(0, windowStart - 1),
+                'endTs': windowEnd + 1, 'pageSize': pageSize, 'pageIndex': 1,
+            }
+            response = await self.swapV2PrivateGetTradeFillHistory(self.extend(params, request))
+            data = self.safe_dict(response, 'data', {})
+            rows = self.safe_list(data, 'fill_history_orders')
+            total = self.safe_integer(data, 'total')
+            if (self.safe_string(response, 'code') != '0') or (rows is None) or (total is None) or (total < len(rows)):
+                raise OperationFailed(self.id + ' fill history response is incomplete')
+            if paginate and ((total >= pageSize) or (total != len(rows))):
+                if windowStart == windowEnd:
+                    raise OperationFailed(self.id + ' fill history overflows one timestamp')
+                middle = self.parse_to_int((windowStart + windowEnd) / 2)
+                windows.append([middle + 1, windowEnd])
+                windows.append([windowStart, middle])
+                continue
+            pageIds = {}
+            for index in range(0, len(rows)):
+                row = rows[index]
+                tradeId = self.safe_string(row, 'tradeId')
+                timestamp = self.parse8601(self.safe_string(row, 'filledTime'))
+                actualOrderId = self.safe_string(row, 'orderId')
+                if (tradeId is None) or (tradeId == '0') or (actualOrderId is None) or (timestamp is None) or (self.safe_bool(pageIds, tradeId) is True):
+                    raise OperationFailed(self.id + ' fill history has invalid identity or timestamp')
+                if (orderId is not None) and (orderId != actualOrderId):
+                    raise OperationFailed(self.id + ' fill history does not match orderId')
+                if (timestamp < windowStart - 1) or (timestamp > windowEnd + 1):
+                    raise OperationFailed(self.id + ' fill history does not match time bounds')
+                pageIds[tradeId] = True
+                if (timestamp < windowStart) or (timestamp > windowEnd):
+                    continue
+                if tradeId in trades:
+                    raise OperationFailed(self.id + ' fill identity has conflicting timestamps')
+                parsed = self.parse_trade(row, market)
+                if (parsed['amount'] is None) or (parsed['price'] is None) or (parsed['cost'] is None) or (self.safe_string(row, 'commission') is None) or (self.safe_string(row, 'commissionAsset') is None):
+                    raise OperationFailed(self.id + ' fill history lacks execution amounts or fees')
+                trades[tradeId] = parsed
+        return self.filter_by_since_limit(self.sort_by(self.to_array(trades), 'timestamp'), since, limit)
 
     def parse_deposit_withdraw_fee(self, fee: dict, currency: Currency = None) -> object:
         #

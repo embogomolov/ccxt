@@ -991,7 +991,8 @@ class bingx(ccxt.async_support.bingx):
         }
         orders = await self.watch(url, messageHash, request, subscriptionHash, subscription)
         limitResolved = limit
-        if self.newUpdates:
+        queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
+        if self.newUpdates and not self.in_array(messageHash, queueHashes):
             limitResolved = orders.getLimit(symbolResolved, limit)
         return self.filter_by_symbol_since_limit(orders, symbolResolved, since, limitResolved, True)
 
@@ -1055,7 +1056,8 @@ class bingx(ccxt.async_support.bingx):
         }
         trades = await self.watch(url, messageHash, request, subscriptionHash, subscription)
         limitResolved = limit
-        if self.newUpdates:
+        queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
+        if self.newUpdates and not self.in_array(messageHash, queueHashes):
             limitResolved = trades.getLimit(symbolResolved, limit)
         return self.filter_by_symbol_since_limit(trades, symbolResolved, since, limitResolved, True)
 
@@ -1526,7 +1528,7 @@ class bingx(ccxt.async_support.bingx):
         parsedOrder = self.parse_order(data)
         if not isSpot:
             # The envelope T is the order update time; o.T is the trade time.
-            updateTimestamp = self.safe_integer(message, 'T')
+            updateTimestamp = self.safe_integer_2(message, 'T', 'E')
             if (updateTimestamp is not None) and (updateTimestamp > 0):
                 orderId = self.safe_string(parsedOrder, 'id')
                 if orderId is not None:
@@ -1540,6 +1542,10 @@ class bingx(ccxt.async_support.bingx):
                                 return
                             break
                 parsedOrder['lastUpdateTimestamp'] = updateTimestamp
+        else:
+            timestamp = self.safe_integer(message, 'E')
+            if timestamp is not None:
+                parsedOrder['lastUpdateTimestamp'] = timestamp
         stored.append(parsedOrder)
         symbol = parsedOrder['symbol']
         spotHash = 'spot:order'
@@ -1547,7 +1553,10 @@ class bingx(ccxt.async_support.bingx):
         messageHash = swapHash
         if isSpot:
             messageHash = spotHash
-        client.resolve(stored, messageHash)
+        queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
+        queued = self.newUpdates and self.in_array(messageHash, queueHashes)
+        resolvedOrders = [parsedOrder] if queued else stored
+        client.resolve(resolvedOrders, messageHash)
         client.resolve(stored, messageHash + ':' + symbol)
 
     def handle_my_trades(self, client: Client, message: dict):
@@ -1620,6 +1629,13 @@ class bingx(ccxt.async_support.bingx):
         marketId = self.safe_string(result, 's')
         market = self.safe_market(marketId, None, '-', type)
         parsed = self.parse_trade(result, market)
+        if not isSpot:
+            parsed['id'] = self.safe_string_2(result, 'td', 't')
+            parsed['amount'] = self.safe_number(result, 'l')
+            parsed['price'] = self.safe_number(result, 'L')
+            parsed['cost'] = self.parse_number(Precise.string_mul(self.safe_string(result, 'l'), self.safe_string(result, 'L')))
+            parsed['timestamp'] = self.safe_integer(parsed, 'timestamp', self.safe_integer(message, 'E'))
+            parsed['datetime'] = self.iso8601(parsed['timestamp'])
         symbol = parsed['symbol']
         spotHash = 'spot:mytrades'
         swapHash = 'swap:mytrades'
@@ -1627,7 +1643,10 @@ class bingx(ccxt.async_support.bingx):
         if isSpot:
             messageHash = spotHash
         cachedTrades.append(parsed)
-        client.resolve(cachedTrades, messageHash)
+        queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
+        queued = self.newUpdates and self.in_array(messageHash, queueHashes)
+        resolvedTrades = [parsed] if queued else cachedTrades
+        client.resolve(resolvedTrades, messageHash)
         client.resolve(cachedTrades, messageHash + ':' + symbol)
 
     def handle_balance(self, client: Client, message: dict):
@@ -1742,8 +1761,16 @@ class bingx(ccxt.async_support.bingx):
                 # `market['linear'] === true`, so an unresolved market id must be skipped here:
                 # delivering it would report the order aggregate `q`/`p` as a single fill.
                 isExecution = (market['linear'] is True) and (self.safe_string(data, 'l') is not None) and (self.safe_string(data, 'L') is not None)
-            if (type == 'TRADE') and isExecution:
+            tradeId = self.safe_string_2(data, 'td', 't')
+            if (type == 'TRADE') and isExecution and (tradeId is not None) and (tradeId != '0'):
                 self.handle_my_trades(client, message)
+        if e == 'TRADE_UPDATE':
+            self.handle_order(client, message)
+            self.handle_my_trades(client, message)
+        if e == 'listenKeyExpired':
+            self.options['listenKey'] = None
+            self.options['lastAuthenticatedTime'] = 0
+            client.reject(NetworkError(self.id + ' private listen key expired'))
         msgData = self.safe_dict(message, 'data')
         msgEvent = self.safe_string(msgData, 'e')
         if msgEvent == '24hTicker':
