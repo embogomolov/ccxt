@@ -130,7 +130,7 @@ class BaseExchange(SyncExchange):
             # happy_eyeballs_delay enables RFC 8305 Happy Eyeballs to avoid IPv6 fallback stalls
             # 0 = race the other family immediately (aiohttp minimum; not Node's 10ms floor)
             self.tcp_connector = aiohttp.TCPConnector(ssl=self.ssl_context, loop=self.asyncio_loop, enable_cleanup_closed=True, family=socket.AF_UNSPEC, happy_eyeballs_delay=0)
-            self.session = aiohttp.ClientSession(loop=self.asyncio_loop, connector=self.tcp_connector, trust_env=self.aiohttp_trust_env)
+            self.session = self.create_aiohttp_session(loop=self.asyncio_loop, connector=self.tcp_connector, trust_env=self.aiohttp_trust_env)
 
     async def close(self, clean_instance_data=False):
         # set before the first await, a lazy open() during close() would leak a session
@@ -315,8 +315,11 @@ class BaseExchange(SyncExchange):
                 enable_cleanup_closed=True,
                 rdns=reverse_dns if reverse_dns else None
             )
-            self.socks_proxy_sessions[socksProxy] = aiohttp.ClientSession(loop=self.asyncio_loop, connector=self.aiohttp_socks_connector, trust_env=self.aiohttp_trust_env)
+            self.socks_proxy_sessions[socksProxy] = self.create_aiohttp_session(loop=self.asyncio_loop, connector=self.aiohttp_socks_connector, trust_env=self.aiohttp_trust_env)
         return self.socks_proxy_sessions[socksProxy]
+
+    def create_aiohttp_session(self, **kwargs):
+        return aiohttp.ClientSession(**kwargs)
 
     async def load_markets_helper(self, reload=False, params={}):
         if not reload:

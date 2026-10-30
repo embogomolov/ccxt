@@ -311,8 +311,7 @@ class Client(object):
             self.log(Exchange.iso8601(Exchange.milliseconds()), 'connecting to', self.url, 'with timeout', self.connectionTimeout, 'ms')
         self.connectionStarted = Exchange.milliseconds()
         try:
-            coroutine = self._create_connection(session)
-            self.connection = await wait_for(coroutine, timeout=int(self.connectionTimeout / 1000))
+            self.connection = await self.open_connection(session)
             if self.retired:
                 return
             self.connecting = False
@@ -364,6 +363,9 @@ class Client(object):
         if self.connection._conn.protocol._payload is None:
             return None
         return self.connection._conn.protocol._payload._buffer
+
+    async def open_connection(self, session):
+        return await wait_for(self._create_connection(session), timeout=int(self.connectionTimeout / 1000))
 
     async def _create_connection(self, session):
         if self.retired:
