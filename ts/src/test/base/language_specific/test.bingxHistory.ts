@@ -87,12 +87,22 @@ async function testBingxHistory () {
         'positionSide': 'BOTH', 'side': 'SELL', 'status': 'CANCELED', 'origQty': '0.002',
         'executedQty': '0', 'time': timestamp, 'clientOrderId': 'abcdef01_sl_0_0',
     }));
-    exchange.swapV2PrivateGetTradeAllOrders = async (params) => ({
-        'code': 0, 'data': { 'orders': orders.filter ((order) => Number (order.orderId) > Number (params.orderId ?? 0)).slice (0, params.limit) },
-    });
-    const history = await exchange.fetchOrders (symbol, timestamp, undefined, { 'until': timestamp + 1000, 'paginate': true });
+    exchange.swapV2PrivateGetTradeAllOrders = async (params) => {
+        for (const key of [ 'type', 'subType', 'paginate', 'paginationCalls' ]) {
+            assert.strictEqual (params[key], undefined);
+        }
+        return { 'code': 0, 'data': { 'orders': orders.filter ((order) => Number (order.orderId) > Number (params.orderId ?? 0)).slice (0, params.limit) } };
+    };
+    const history = await exchange.fetchOrders (symbol, timestamp, undefined, { 'until': timestamp + 1000, 'paginate': true, 'type': 'swap', 'subType': 'linear' });
     assert.strictEqual (history.length, 1001);
     assert.strictEqual (new Set (history.map ((order) => order.id)).size, 1001);
+    exchange.swapV1PrivateGetTradeFullOrder = async (params) => {
+        for (const key of [ 'type', 'subType', 'paginate' ]) {
+            assert.strictEqual (params[key], undefined);
+        }
+        return { 'code': 0, 'data': { 'orders': [] } };
+    };
+    assert.deepStrictEqual (await exchange.fetchOrders (symbol, timestamp, undefined, { 'paginate': false, 'type': 'swap', 'subType': 'linear' }), []);
     const fundingRows = Array.from ({ length: 1001 }, (_, index) => ({
         'tranId': String (index + 1), 'time': timestamp + index, 'symbol': 'ETH-USDT',
         'incomeType': 'FUNDING_FEE', 'income': (index % 2 !== 0) ? '-0.1' : '0.1', 'asset': 'USDT',

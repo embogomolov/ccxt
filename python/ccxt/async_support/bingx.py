@@ -1909,15 +1909,13 @@ class bingx(Exchange, ImplicitAPI):
         isInverse = (market['inverse'] is True) if (market is not None) else (subType == 'inverse')
         if isInverse:
             raise NotSupported(self.id + ' fetchFundingHistory() is not supported for inverse swap markets')
-        params = paramsSubType
-        paginate = False
-        paginate, params = self.handle_option_and_params(params, 'fetchFundingHistory', 'paginate')
-        until = self.safe_integer_2(params, 'until', 'endTime', self.milliseconds() if paginate else None)
-        remainingCalls = None
-        remainingCalls, params = self.handle_option_and_params(params, 'fetchFundingHistory', 'paginationCalls', 10)
+        paginate, paramsPaginate = self.handle_option_and_params(paramsSubType, 'fetchFundingHistory', 'paginate')
+        until = self.safe_integer_2(paramsPaginate, 'until', 'endTime', self.milliseconds() if paginate else None)
+        paginationCalls, paramsPagination = self.handle_option_and_params(paramsPaginate, 'fetchFundingHistory', 'paginationCalls', 10)
+        remainingCalls = paginationCalls
         if paginate and ((since is None) or (until is None) or (since < 0) or (until < since) or (remainingCalls <= 0)):
             raise ArgumentsRequired(self.id + ' funding history requires since, ordered time bounds and a positive paginationCalls')
-        params = self.omit(params, ['until', 'endTime', 'startTime', 'limit'])
+        requestParams = self.omit(paramsPagination, ['until', 'endTime', 'startTime', 'limit'])
         pageSize = 1000 if paginate else limit
         windows = [[since, until]]
         incomes = {}
@@ -1939,7 +1937,7 @@ class bingx(Exchange, ImplicitAPI):
                 request['limit'] = pageSize
             if paginate:
                 request['endTime'] = windowEnd + 1
-            response = await self.swapV2PrivateGetUserIncome(self.extend(params, request))
+            response = await self.swapV2PrivateGetUserIncome(self.extend(requestParams, request))
             rows = self.safe_list(response, 'data')
             if (self.safe_string(response, 'code') != '0') or not ('data' in response) or ((rows is None) and (response['data'] is not None)):
                 raise OperationFailed(self.id + ' funding history response is incomplete')
@@ -4664,9 +4662,9 @@ class bingx(Exchange, ImplicitAPI):
         until = self.safe_integer_2(params, 'until', 'endTime', self.milliseconds())
         if (since is None) or (since < 0) or (until < since):
             raise ArgumentsRequired(self.id + ' paginated orders require since <= until')
-        remainingCalls = None
-        remainingCalls, params = self.handle_option_and_params(params, 'fetchOrders', 'paginationCalls', 10)
-        params = self.omit(params, ['until', 'endTime', 'orderId', 'limit', 'startTime'])
+        paginationCalls, paramsPagination = self.handle_option_and_params(params, 'fetchOrders', 'paginationCalls', 10)
+        remainingCalls = paginationCalls
+        requestParams = self.omit(paramsPagination, ['until', 'endTime', 'orderId', 'limit', 'startTime'])
         market = None if (symbol is None) else self.market(symbol)
         records = {}
         windowStart = since
@@ -4682,7 +4680,7 @@ class bingx(Exchange, ImplicitAPI):
             }
             if market is not None:
                 request['symbol'] = market['id']
-            response = await self.swapV2PrivateGetTradeAllOrders(self.extend(params, request))
+            response = await self.swapV2PrivateGetTradeAllOrders(self.extend(requestParams, request))
             data = self.safe_dict(response, 'data', {})
             rows = self.safe_list(data, 'orders')
             if (self.safe_string(response, 'code') != '0') or (rows is None):
@@ -4735,15 +4733,14 @@ class bingx(Exchange, ImplicitAPI):
             raise NotSupported(self.id + ' fetchOrders() is only supported for swap markets')
         if (subType == 'inverse') or ((market is not None) and (market['inverse'] is True)):
             raise NotSupported(self.id + ' fetchOrders() is not supported for inverse swap markets')
-        paginate = False
-        paginate, params = self.handle_option_and_params(params, 'fetchOrders', 'paginate', False)
+        paginate, paramsPaginate = self.handle_option_and_params(paramsSubType, 'fetchOrders', 'paginate', False)
         if paginate:
-            return await self.fetch_paginated_orders(symbol, since, limit, params)
+            return await self.fetch_paginated_orders(symbol, since, limit, paramsPaginate)
         if limit is not None:
             request['limit'] = limit
         if since is not None:
             request['startTime'] = since
-        requestUntil, paramsUntil = self.handle_until_option('endTime', request, paramsSubType)
+        requestUntil, paramsUntil = self.handle_until_option('endTime', request, paramsPaginate)
         response = await self.swapV1PrivateGetTradeFullOrder(self.extend(requestUntil, paramsUntil))
         #
         #     {
@@ -6120,18 +6117,17 @@ class bingx(Exchange, ImplicitAPI):
         market = self.market(symbol)
         now = self.milliseconds()
         retention = 7 * 86400000
-        since = (now - retention + 1) if (since is None) else since
+        sinceResolved = (now - retention + 1) if (since is None) else since
         until = self.safe_integer_2(params, 'until', 'endTs', now)
-        if (since < now - retention) or (since < 0) or (until < since):
+        if (sinceResolved < now - retention) or (sinceResolved < 0) or (until < sinceResolved):
             raise ArgumentsRequired(self.id + ' fillHistory requires an ordered interval within the last seven days')
-        paginate = False
-        paginate, params = self.handle_option_and_params(params, 'fetchMyTrades', 'paginate', False)
-        remainingCalls = None
-        remainingCalls, params = self.handle_option_and_params(params, 'fetchMyTrades', 'paginationCalls', 10)
-        params = self.omit(params, ['until', 'endTs', 'startTs', 'pageSize', 'pageIndex', 'lastFillId', 'tradingUnit'])
-        orderId = self.safe_string(params, 'orderId')
+        paginate, paramsPaginate = self.handle_option_and_params(params, 'fetchMyTrades', 'paginate', False)
+        paginationCalls, paramsPagination = self.handle_option_and_params(paramsPaginate, 'fetchMyTrades', 'paginationCalls', 10)
+        remainingCalls = paginationCalls
+        requestParams = self.omit(paramsPagination, ['until', 'endTs', 'startTs', 'pageSize', 'pageIndex', 'lastFillId', 'tradingUnit'])
+        orderId = self.safe_string(requestParams, 'orderId')
         pageSize = 1000 if paginate else min(self.safe_integer({'limit': limit}, 'limit', 1000), 1000)
-        windows = [[since, until]]
+        windows = [[sinceResolved, until]]
         trades = {}
         while(len(windows) > 0):
             if remainingCalls <= 0:
@@ -6144,7 +6140,7 @@ class bingx(Exchange, ImplicitAPI):
                 'symbol': market['id'], 'startTs': max(0, windowStart - 1),
                 'endTs': windowEnd + 1, 'pageSize': pageSize, 'pageIndex': 1,
             }
-            response = await self.swapV2PrivateGetTradeFillHistory(self.extend(params, request))
+            response = await self.swapV2PrivateGetTradeFillHistory(self.extend(requestParams, request))
             data = self.safe_dict(response, 'data', {})
             rows = self.safe_list(data, 'fill_history_orders')
             total = self.safe_integer(data, 'total')
@@ -6178,7 +6174,7 @@ class bingx(Exchange, ImplicitAPI):
                 if (parsed['amount'] is None) or (parsed['price'] is None) or (parsed['cost'] is None) or (self.safe_string(row, 'commission') is None) or (self.safe_string(row, 'commissionAsset') is None):
                     raise OperationFailed(self.id + ' fill history lacks execution amounts or fees')
                 trades[tradeId] = parsed
-        return self.filter_by_since_limit(self.sort_by(self.to_array(trades), 'timestamp'), since, limit)
+        return self.filter_by_since_limit(self.sort_by(self.to_array(trades), 'timestamp'), sinceResolved, limit)
 
     def parse_deposit_withdraw_fee(self, fee: dict, currency: Currency = None) -> object:
         #

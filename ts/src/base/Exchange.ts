@@ -6740,7 +6740,8 @@ export class BaseExchange {
         const retries = 0;
         // implicit endpoints may pass a list body as params: keep it an untyped box
         const requestParams: object = params;
-        let [ retriesMaxRetriesOnFailure, paramsMaxRetriesOnFailure ] = this.handleOptionIntegerAndParams (requestParams, path, 'maxRetriesOnFailure', retries);
+        const [ configuredRetries, paramsMaxRetriesOnFailure ] = this.handleOptionIntegerAndParams (requestParams, path, 'maxRetriesOnFailure', retries);
+        let retriesMaxRetriesOnFailure = configuredRetries;
         if ('maxRetriesOnFailureMethods' in this.options) {
             const retryMethods = this.options['maxRetriesOnFailureMethods'];
             if (!Array.isArray (retryMethods)) {

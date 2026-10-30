@@ -11,7 +11,7 @@ export default async function testBeforeRestRequest () {
     exchange.beforeRestRequest = async (path, api, method, params) => {
         await Promise.resolve ();
         assert.equal (path, 'probe');
-        assert.equal (api, 'public');
+        assert.deepEqual (api, [ 'public' ]);
         assert.equal (method, 'GET');
         assert.deepEqual (params, { 'symbol': 'BTCUSDT' });
         events.push ('hook');
@@ -21,21 +21,21 @@ export default async function testBeforeRestRequest () {
         events.push ('sign');
         return { 'url': 'https://example.invalid', 'method': 'GET', 'headers': {}, 'body': undefined };
     };
-    let attempts = 0;
+    let attemptCount = 0;
     exchange.fetch = async () => {
         events.push ('fetch');
-        if (++attempts === 1) {
+        if (++attemptCount === 1) {
             throw new OperationFailed ('retry');
         }
         return 'OK';
     };
-    assert.equal (await exchange.fetch2 ('probe', 'public', 'GET', {
+    assert.equal (await exchange.fetch2 ('probe', [ 'public' ], 'GET', {
         'symbol': 'BTCUSDT', 'maxRetriesOnFailure': 1,
     }), 'OK');
     assert.deepEqual (events, [ 'hook', 'sign', 'fetch', 'hook', 'sign', 'fetch' ]);
     const failure = new OperationFailed ('guard failure');
     exchange.beforeRestRequest = async () => { throw failure; };
-    await assert.rejects (exchange.fetch2 ('probe', 'public', 'GET', {
+    await assert.rejects (exchange.fetch2 ('probe', [ 'public' ], 'GET', {
         'maxRetriesOnFailure': 2,
     }), error => error === failure);
     assert.equal (events.length, 6);
@@ -60,7 +60,7 @@ export default async function testBeforeRestRequest () {
             }
             return 'OK';
         };
-        const request = guarded.fetch2 ('probe', 'public', method, {
+        const request = guarded.fetch2 ('probe', [ 'public' ], method, {
             'symbol': 'BTCUSDT', 'maxRetriesOnFailure': 3,
         });
         if (method === 'GET') {
@@ -71,7 +71,7 @@ export default async function testBeforeRestRequest () {
             assert.deepEqual (attempts, [ 'hook', 'sign', 'fetch' ]);
         }
         count = 0;
-        await assert.rejects (guarded.fetch2 ('probe', 'public', 'GET', {
+        await assert.rejects (guarded.fetch2 ('probe', [ 'public' ], 'GET', {
             'symbol': 'BTCUSDT', 'maxRetriesOnFailure': 0,
         }), RateLimitExceeded);
         assert.equal (count, 1);

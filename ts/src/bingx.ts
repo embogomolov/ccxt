@@ -1974,16 +1974,14 @@ export default class bingx extends Exchange {
         if (isInverse) {
             throw new NotSupported (this.id + ' fetchFundingHistory() is not supported for inverse swap markets');
         }
-        params = paramsSubType;
-        let paginate = false;
-        [ paginate, params ] = this.handleOptionAndParams (params, 'fetchFundingHistory', 'paginate');
-        const until = this.safeInteger2 (params, 'until', 'endTime', paginate ? this.milliseconds () : undefined);
-        let remainingCalls = undefined;
-        [ remainingCalls, params ] = this.handleOptionAndParams (params, 'fetchFundingHistory', 'paginationCalls', 10);
+        const [ paginate, paramsPaginate ] = this.handleOptionAndParams (paramsSubType, 'fetchFundingHistory', 'paginate');
+        const until = this.safeInteger2 (paramsPaginate, 'until', 'endTime', paginate ? this.milliseconds () : undefined);
+        const [ paginationCalls, paramsPagination ] = this.handleOptionAndParams (paramsPaginate, 'fetchFundingHistory', 'paginationCalls', 10);
+        let remainingCalls = paginationCalls;
         if (paginate && ((since === undefined) || (until === undefined) || (since < 0) || (until < since) || (remainingCalls <= 0))) {
             throw new ArgumentsRequired (this.id + ' funding history requires since, ordered time bounds and a positive paginationCalls');
         }
-        params = this.omit (params, [ 'until', 'endTime', 'startTime', 'limit' ]);
+        const requestParams = this.omit (paramsPagination, [ 'until', 'endTime', 'startTime', 'limit' ]);
         const pageSize = paginate ? 1000 : limit;
         const windows = [ [ since, until ] ];
         const incomes: Dict = {};
@@ -2011,7 +2009,7 @@ export default class bingx extends Exchange {
             if (paginate) {
                 request['endTime'] = windowEnd + 1;
             }
-            const response = await this.swapV2PrivateGetUserIncome (this.extend (params, request));
+            const response = await this.swapV2PrivateGetUserIncome (this.extend (requestParams, request));
             const rows = this.safeList (response, 'data');
             if ((this.safeString (response, 'code') !== '0') || !('data' in response) || ((rows === undefined) && (response['data'] !== null))) {
                 throw new OperationFailed (this.id + ' funding history response is incomplete');
@@ -2032,7 +2030,7 @@ export default class bingx extends Exchange {
             const pageIds: Dict = {};
             for (let index = 0; index < data.length; index++) {
                 const row = data[index];
-                const income = this.parseIncome (row, market);
+                const income: Dict = this.parseIncome (row, market);
                 const incomeId = income['id'];
                 const timestamp = income['timestamp'];
                 if ((incomeId === undefined) || (incomeId === '') || (timestamp === undefined) || (income['amount'] === undefined) || (income['code'] === undefined) || (this.safeString (row, 'incomeType') !== 'FUNDING_FEE') || (incomeId in pageIds)) {
@@ -4943,9 +4941,9 @@ export default class bingx extends Exchange {
         if ((since === undefined) || (since < 0) || (until < since)) {
             throw new ArgumentsRequired (this.id + ' paginated orders require since <= until');
         }
-        let remainingCalls = undefined;
-        [ remainingCalls, params ] = this.handleOptionAndParams (params, 'fetchOrders', 'paginationCalls', 10);
-        params = this.omit (params, [ 'until', 'endTime', 'orderId', 'limit', 'startTime' ]);
+        const [ paginationCalls, paramsPagination ] = this.handleOptionAndParams (params, 'fetchOrders', 'paginationCalls', 10);
+        let remainingCalls = paginationCalls;
+        const requestParams = this.omit (paramsPagination, [ 'until', 'endTime', 'orderId', 'limit', 'startTime' ]);
         const market = (symbol === undefined) ? undefined : this.market (symbol);
         const records: Dict = {};
         let windowStart = since;
@@ -4963,7 +4961,7 @@ export default class bingx extends Exchange {
             if (market !== undefined) {
                 request['symbol'] = market['id'];
             }
-            const response = await this.swapV2PrivateGetTradeAllOrders (this.extend (params, request));
+            const response = await this.swapV2PrivateGetTradeAllOrders (this.extend (requestParams, request));
             const data = this.safeDict (response, 'data', {});
             const rows = this.safeList (data, 'orders');
             if ((this.safeString (response, 'code') !== '0') || (rows === undefined)) {
@@ -5027,10 +5025,9 @@ export default class bingx extends Exchange {
         if ((subType === 'inverse') || ((market !== undefined) && (market['inverse'] === true))) {
             throw new NotSupported (this.id + ' fetchOrders() is not supported for inverse swap markets');
         }
-        let paginate = false;
-        [ paginate, params ] = this.handleOptionAndParams (params, 'fetchOrders', 'paginate', false);
+        const [ paginate, paramsPaginate ] = this.handleOptionAndParams (paramsSubType, 'fetchOrders', 'paginate', false);
         if (paginate) {
-            return await this.fetchPaginatedOrders (symbol, since, limit, params);
+            return await this.fetchPaginatedOrders (symbol, since, limit, paramsPaginate);
         }
         if (limit !== undefined) {
             request['limit'] = limit;
@@ -5038,7 +5035,7 @@ export default class bingx extends Exchange {
         if (since !== undefined) {
             request['startTime'] = since;
         }
-        const [ requestUntil, paramsUntil ] = this.handleUntilOption ('endTime', request, paramsSubType);
+        const [ requestUntil, paramsUntil ] = this.handleUntilOption ('endTime', request, paramsPaginate);
         const response = await this.swapV1PrivateGetTradeFullOrder (this.extend (requestUntil, paramsUntil));
         //
         //     {
@@ -6509,19 +6506,18 @@ export default class bingx extends Exchange {
         const market = this.market (symbol);
         const now = this.milliseconds ();
         const retention = 7 * 86400000;
-        since = (since === undefined) ? (now - retention + 1) : since;
+        const sinceResolved = (since === undefined) ? (now - retention + 1) : since;
         const until = this.safeInteger2 (params, 'until', 'endTs', now);
-        if ((since < now - retention) || (since < 0) || (until < since)) {
+        if ((sinceResolved < now - retention) || (sinceResolved < 0) || (until < sinceResolved)) {
             throw new ArgumentsRequired (this.id + ' fillHistory requires an ordered interval within the last seven days');
         }
-        let paginate = false;
-        [ paginate, params ] = this.handleOptionAndParams (params, 'fetchMyTrades', 'paginate', false);
-        let remainingCalls = undefined;
-        [ remainingCalls, params ] = this.handleOptionAndParams (params, 'fetchMyTrades', 'paginationCalls', 10);
-        params = this.omit (params, [ 'until', 'endTs', 'startTs', 'pageSize', 'pageIndex', 'lastFillId', 'tradingUnit' ]);
-        const orderId = this.safeString (params, 'orderId');
+        const [ paginate, paramsPaginate ] = this.handleOptionAndParams (params, 'fetchMyTrades', 'paginate', false);
+        const [ paginationCalls, paramsPagination ] = this.handleOptionAndParams (paramsPaginate, 'fetchMyTrades', 'paginationCalls', 10);
+        let remainingCalls = paginationCalls;
+        const requestParams = this.omit (paramsPagination, [ 'until', 'endTs', 'startTs', 'pageSize', 'pageIndex', 'lastFillId', 'tradingUnit' ]);
+        const orderId = this.safeString (requestParams, 'orderId');
         const pageSize = paginate ? 1000 : Math.min (this.safeInteger ({ 'limit': limit }, 'limit', 1000), 1000);
-        const windows = [ [ since, until ] ];
+        const windows = [ [ sinceResolved, until ] ];
         const trades: Dict = {};
         while (windows.length > 0) {
             if (remainingCalls <= 0) {
@@ -6535,7 +6531,7 @@ export default class bingx extends Exchange {
                 'symbol': market['id'], 'startTs': Math.max (0, windowStart - 1),
                 'endTs': windowEnd + 1, 'pageSize': pageSize, 'pageIndex': 1,
             };
-            const response = await this.swapV2PrivateGetTradeFillHistory (this.extend (params, request));
+            const response = await this.swapV2PrivateGetTradeFillHistory (this.extend (requestParams, request));
             const data = this.safeDict (response, 'data', {});
             const rows = this.safeList (data, 'fill_history_orders');
             const total = this.safeInteger (data, 'total');
@@ -6580,7 +6576,7 @@ export default class bingx extends Exchange {
                 trades[tradeId] = parsed;
             }
         }
-        return this.filterBySinceLimit (this.sortBy (this.toArray (trades), 'timestamp'), since, limit) as Trade[];
+        return this.filterBySinceLimit (this.sortBy (this.toArray (trades), 'timestamp'), sinceResolved, limit) as Trade[];
     }
 
     override parseDepositWithdrawFee (fee: NullableDict, currency: Currency = undefined): any {

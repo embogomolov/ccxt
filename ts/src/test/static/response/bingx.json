@@ -6618,7 +6618,7 @@
                     "markPrice": 95.62,
                     "lastPrice": null,
                     "side": "long",
-                    "hedged": null,
+                    "hedged": true,
                     "timestamp": null,
                     "datetime": null,
                     "lastUpdateTimestamp": null,
@@ -6626,11 +6626,12 @@
                     "maintenanceMarginPercentage": null,
                     "collateral": null,
                     "initialMargin": 1.9128,
-                    "initialMarginPercentage": null,
+                    "initialMarginPercentage": 0.20005020080321284,
                     "leverage": 5,
                     "marginRatio": null,
                     "stopLossPrice": null,
-                    "takeProfitPrice": null
+                    "takeProfitPrice": null,
+                    "positionMargin": null
                 }
             },
             {
@@ -6652,7 +6653,8 @@
                     },
                     "symbol": "LTC/USDT:USDT",
                     "contracts": 0,
-                    "contractSize": 1
+                    "contractSize": 1,
+                    "positionMargin": null
                 }
             },
             {
@@ -6704,7 +6706,7 @@
                     },
                     "id": "1813080351385337856",
                     "symbol": "SOL/USD:SOL",
-                    "notional": null,
+                    "notional": 0.06313051602883801,
                     "marginMode": "cross",
                     "liquidationPrice": 23.968303426677032,
                     "entryPrice": 158.63,
@@ -6716,7 +6718,7 @@
                     "markPrice": 158.402,
                     "lastPrice": null,
                     "side": "long",
-                    "hedged": null,
+                    "hedged": true,
                     "timestamp": null,
                     "datetime": null,
                     "lastUpdateTimestamp": 1721107015848,
@@ -6724,11 +6726,12 @@
                     "maintenanceMarginPercentage": null,
                     "collateral": null,
                     "initialMargin": 0.00630398,
-                    "initialMarginPercentage": null,
+                    "initialMarginPercentage": 0.099856303996,
                     "leverage": 10,
                     "marginRatio": null,
                     "stopLossPrice": null,
-                    "takeProfitPrice": null
+                    "takeProfitPrice": null,
+                    "positionMargin": null
                 }
             },
             {
@@ -6750,7 +6753,8 @@
                     },
                     "symbol": "SOL/USD:SOL",
                     "contracts": 0,
-                    "contractSize": 10
+                    "contractSize": 10,
+                    "positionMargin": null
                 }
             }
         ],

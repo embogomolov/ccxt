@@ -89,8 +89,8 @@ async def test_private_stream_batches():
 
     binance = ccxtpro.binance({'newUpdates': True})
     binance.newUpdates = True
-    binance_client = create_client(hashes=['orders', 'myTrades', 'future:positions'])
-    binance_client.subscriptions['future'] = {}
+    binance_client = create_client(hashes=['orders', 'myTrades', 'linear:positions'])
+    binance_client.subscriptions['linear'] = {}
     binance.parse_ws_order = lambda order: dict(order)
     binance.parse_ws_trade = lambda trade: dict(trade)
     binance.parse_ws_position = lambda position: dict(position)
@@ -107,11 +107,11 @@ async def test_private_stream_batches():
     assert [trade['id'] for trade in await first_trade] == ['1']
     assert [trade['id'] for trade in await binance_client.future('myTrades')] == ['2']
 
-    first_position = binance_client.future('future:positions')
+    first_position = binance_client.future('linear:positions')
     binance.handle_positions(binance_client, {'E': 1, 'a': {'P': [{'symbol': 'BTC/USDT:USDT', 'side': 'long', 'contracts': 1}]}})
     binance.handle_positions(binance_client, {'E': 2, 'a': {'P': [{'symbol': 'BTC/USDT:USDT', 'side': 'long', 'contracts': 2}]}})
     assert (await first_position)[0]['contracts'] == 1
-    assert (await binance_client.future('future:positions'))[0]['contracts'] == 2
+    assert (await binance_client.future('linear:positions'))[0]['contracts'] == 2
 
 
 async def test_message_queue_lifecycle():

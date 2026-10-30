@@ -5985,7 +5985,8 @@ class BaseExchange(object):
         retries = 0
         # implicit endpoints may pass a list body as params: keep it an untyped box
         requestParams = params
-        retriesMaxRetriesOnFailure, paramsMaxRetriesOnFailure = self.handle_option_integer_and_params(requestParams, path, 'maxRetriesOnFailure', retries)
+        configuredRetries, paramsMaxRetriesOnFailure = self.handle_option_integer_and_params(requestParams, path, 'maxRetriesOnFailure', retries)
+        retriesMaxRetriesOnFailure = configuredRetries
         if 'maxRetriesOnFailureMethods' in self.options:
             retryMethods = self.options['maxRetriesOnFailureMethods']
             if not isinstance(retryMethods, list):

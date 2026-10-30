@@ -31,7 +31,7 @@ async function testBingxPosition () {
         const emptyResponse = { 'code': 0, 'data': [] };
         exchange[endpoint] = async () => emptyResponse;
         assert.deepStrictEqual (await exchange.fetchPosition (symbol), {
-            'info': emptyResponse, 'symbol': symbol, 'contracts': 0, 'contractSize': 1,
+            'info': emptyResponse, 'symbol': symbol, 'contracts': 0, 'contractSize': 1, 'positionMargin': undefined,
         });
         for (const numberParser of [ Number, String ]) {
             exchange.number = numberParser;
