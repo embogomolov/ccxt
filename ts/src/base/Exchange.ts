@@ -1795,93 +1795,90 @@ export class BaseExchange {
         return Math.min (jittered, maxDelay); // the ceiling holds regardless of jitter
     }
 
+    scheduleSubscription (client: WsClient, url: string, message: any, subscribeHashes: Strings, subscription: any, backoffDelay: number) {
+        const missing: string[] = [];
+        for (const subscribeHash of subscribeHashes || []) {
+            if (client.subscriptions[subscribeHash] === undefined) {
+                missing.push (subscribeHash);
+                client.subscriptions[subscribeHash] = (subscription !== undefined) ? subscription : true;
+            }
+        }
+        const connected = client.connect (backoffDelay);
+        const pending = new Set<Promise<void>> ();
+        if ((message !== undefined) && (message !== null) && ((subscribeHashes === undefined) || missing.length > 0)) {
+            const operation = (async () => {
+                try {
+                    await Future.raceAsync ([ connected, client.subscriptionClosed ]);
+                    if (client.subscriptionsStopped || this.clients[url] !== client) {
+                        throw client.error || new NetworkError ('WebSocket subscription client is closed');
+                    }
+                    const cost = this.safeValue (this.safeValue (this.options, 'ws'), 'cost', 1);
+                    if (this.enableRateLimit && client.throttle !== undefined) {
+                        await Future.raceAsync ([ client.throttle (cost), client.subscriptionClosed ]);
+                    }
+                    if (client.subscriptionsStopped || this.clients[url] !== client) {
+                        throw client.error || new NetworkError ('WebSocket subscription client is closed');
+                    }
+                    await Future.raceAsync ([ client.send (message), client.subscriptionClosed ]);
+                } catch (error) {
+                    for (const subscribeHash of missing) {
+                        delete client.subscriptions[subscribeHash];
+                    }
+                    throw error;
+                }
+            }) ();
+            client.pendingSubscriptionTasks.add (operation);
+            pending.add (operation);
+            for (const subscribeHash of missing) {
+                client.subscriptionTasks[subscribeHash] = operation;
+            }
+            const settled = () => {
+                client.pendingSubscriptionTasks.delete (operation);
+                for (const subscribeHash of missing) {
+                    if (client.subscriptionTasks[subscribeHash] === operation) {
+                        delete client.subscriptionTasks[subscribeHash];
+                    }
+                }
+            };
+            operation.then (settled, settled);
+        }
+        for (const subscribeHash of subscribeHashes || []) {
+            const operation = client.subscriptionTasks[subscribeHash];
+            if (operation !== undefined) {
+                pending.add (operation);
+            }
+        }
+        return { connected, 'pending': Array.from (pending) };
+    }
+
+    async startSubscription (url: string, message: any = undefined, subscribeHashes: Strings = undefined, subscription: any = undefined) {
+        const clientExisted = (url in this.clients);
+        const client = this.client (url) as WsClient;
+        const backoffDelay = clientExisted ? 0 : this.calculateWsBackoffDelay (url);
+        const started = this.scheduleSubscription (client, url, message, subscribeHashes, subscription, backoffDelay);
+        await Future.raceAsync ([ started.connected, client.subscriptionClosed ]);
+        await Promise.all (started.pending);
+        if (client.subscriptionsStopped || this.clients[url] !== client) {
+            throw client.error || new NetworkError ('WebSocket subscription client is closed');
+        }
+    }
+
     watchMultiple (url: Str, messageHashes: string[], message: any = undefined, subscribeHashes: Strings = undefined, subscription: any = undefined): FutureInterface {
-        //
-        // essentially: Future.race over client.future (hash) for each messageHash, then
-        // client.connect ().then (send subscribe message once per subscribeHash);
-        // the version below adds the bookkeeping around that
-        //
         if (url === undefined) {
             throw new ArgumentsRequired (this.id + ' watchMultiple() requires a url argument');
         }
         const clientExisted = (url in this.clients);
         const client = this.client (url) as WsClient;
-        //
-        // flow: the future is handed to the caller first, then connect → subscribe;
-        // the future settles when the matching message is received and resolved
-        //
         const future = Future.race (messageHashes.map ((messageHash) => client.future (messageHash)));
-        // read and write subscription, this is done before connecting the client
-        // to avoid race conditions when other parts of the code read or write to the client.subscriptions
-        const missingSubscriptions: string[] = [];
-        if (subscribeHashes !== undefined) {
-            for (let i = 0; i < subscribeHashes.length; i++) {
-                const subscribeHash = subscribeHashes[i];
-                if (client.subscriptions[subscribeHash] === undefined) {
-                    missingSubscriptions.push (subscribeHash);
-                    client.subscriptions[subscribeHash] = (subscription !== undefined) ? subscription : true;
-                }
-            }
-        }
-        // we intentionally do not use await here to avoid unhandled exceptions
-        // the policy is to make sure that 100% of promises are resolved or rejected
-        // either with a call to client.resolve or client.reject with
-        //  a proper exception class instance
-        let backoffDelay = 0;
-        if (!clientExisted) {
-            // count real dials only - re-entrant watch calls for live or in-flight
-            // connections must not touch the backoff state, see https://github.com/ccxt/ccxt/pull/29627
-            backoffDelay = this.calculateWsBackoffDelay (url);
-        }
-        const connected = client.connect (backoffDelay);
-        // the following is executed only if the catch-clause does not
-        // catch any connection-level exceptions from the client
-        // (connection established successfully)
-        if ((subscribeHashes === undefined) || (missingSubscriptions.length > 0)) {
-            connected.then (() => {
-                const options = this.safeValue (this.options, 'ws');
-                const cost = this.safeValue (options, 'cost', 1);
-                if ((message !== undefined) && (message !== null)) {
-                    if (this.enableRateLimit && (client.throttle !== undefined)) {
-                        // add cost here |
-                        //               |
-                        //               V
-                        client.throttle (cost).then (() => {
-                            client.send (message);
-                        }).catch ((e: any) => {
-                            for (let i = 0; i < missingSubscriptions.length; i++) {
-                                const subscribeHash = missingSubscriptions[i];
-                                delete client.subscriptions[subscribeHash];
-                            }
-                            future.reject (e);
-                        });
-                    } else {
-                        client.send (message)
-                            .catch ((e) => {
-                                for (let i = 0; i < missingSubscriptions.length; i++) {
-                                    const subscribeHash = missingSubscriptions[i];
-                                    delete client.subscriptions[subscribeHash];
-                                }
-                                future.reject (e);
-                            });
-                    }
-                }
-            }).catch ((e) => {
-                for (let i = 0; i < missingSubscriptions.length; i++) {
-                    const subscribeHash = missingSubscriptions[i];
-                    delete client.subscriptions[subscribeHash];
-                }
-                future.reject (e);
-            });
+        const started = this.scheduleSubscription (client, url, message, subscribeHashes, subscription, clientExisted ? 0 : this.calculateWsBackoffDelay (url));
+        started.connected.catch ((error) => future.reject (error));
+        for (const operation of started.pending) {
+            operation.catch ((error) => future.reject (error));
         }
         return future;
     }
 
     watch (url: Str, messageHash: Str, message: any = undefined, subscribeHash: any = undefined, subscription: any = undefined) {
-        //
-        // essentially: client.future (messageHash), then client.connect ().then (send subscribe
-        // message once per subscribeHash); the version below adds the bookkeeping around that
-        //
         if (url === undefined) {
             throw new ArgumentsRequired (this.id + ' watch() requires a url argument');
         }
@@ -1890,58 +1887,22 @@ export class BaseExchange {
         }
         const clientExisted = (url in this.clients);
         const client = this.client (url) as WsClient;
-        //
-        // flow: the future is handed to the caller first, then connect → subscribe;
-        // the future settles when the matching message is received and resolved
-        //
-        if ((subscribeHash === undefined) && (messageHash !== undefined) && (messageHash in client.futures)) {
+        if ((subscribeHash === undefined) && (messageHash in client.futures)) {
             return client.futures[messageHash];
         }
         const future = client.future (messageHash);
-        // read and write subscription, this is done before connecting the client
-        // to avoid race conditions when other parts of the code read or write to the client.subscriptions
-        const clientSubscription = client.subscriptions[subscribeHash];
-        if (clientSubscription === undefined) {
-            client.subscriptions[subscribeHash] = (subscription !== undefined) ? subscription : true;
-        }
-        // we intentionally do not use await here to avoid unhandled exceptions
-        // the policy is to make sure that 100% of promises are resolved or rejected
-        // either with a call to client.resolve or client.reject with
-        //  a proper exception class instance
-        let backoffDelay = 0;
-        if (!clientExisted) {
-            // count real dials only - re-entrant watch calls for live or in-flight
-            // connections must not touch the backoff state, see https://github.com/ccxt/ccxt/pull/29627
-            backoffDelay = this.calculateWsBackoffDelay (url);
-        }
-        const connected = client.connect (backoffDelay);
-        // the following is executed only if the catch-clause does not
-        // catch any connection-level exceptions from the client
-        // (connection established successfully)
-        if (clientSubscription === undefined) {
-            connected.then (() => {
-                const options = this.safeValue (this.options, 'ws');
-                const cost = this.safeValue (options, 'cost', 1);
-                if ((message !== undefined) && (message !== null)) {
-                    if (this.enableRateLimit && (client.throttle !== undefined)) {
-                        // add cost here |
-                        //               |
-                        //               V
-                        client.throttle (cost).then (() => {
-                            client.send (message);
-                        }).catch ((e: any) => {
-                            client.onError (e);
-                        });
-                    } else {
-                        client.send (message)
-                            .catch ((e) => {
-                                client.onError (e);
-                            });
-                    }
+        const started = this.scheduleSubscription (client, url, message, [ subscribeHash ], subscription, clientExisted ? 0 : this.calculateWsBackoffDelay (url));
+        started.connected.catch ((error) => {
+            delete client.subscriptions[subscribeHash];
+            future.reject (error);
+        });
+        for (const operation of started.pending) {
+            operation.catch ((error) => {
+                if (!client.subscriptionsStopped) {
+                    client.onError (error);
+                } else {
+                    future.reject (error);
                 }
-            }).catch ((e) => {
-                delete client.subscriptions[subscribeHash];
-                future.reject (e);
             });
         }
         return future;
@@ -10228,6 +10189,33 @@ export default class Exchange extends BaseExchange {
 
     async fetchPosition (symbol: string, params: Dict = {}): Promise<Position> {
         throw new NotSupported (this.id + ' fetchPosition() is not supported yet');
+    }
+
+    async prepareOrdersSubscription (symbol: Str = undefined, params: Dict = {}): Promise<Dict> {
+        throw new NotSupported (this.id + ' startOrders() is not supported');
+    }
+
+    async startOrders (symbol: Str = undefined, params: Dict = {}): Promise<any> {
+        const stream = await this.prepareOrdersSubscription (symbol, params);
+        return await this.startSubscription (stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription']);
+    }
+
+    async prepareMyTradesSubscription (symbol: Str = undefined, params: Dict = {}): Promise<Dict> {
+        throw new NotSupported (this.id + ' startMyTrades() is not supported');
+    }
+
+    async startMyTrades (symbol: Str = undefined, params: Dict = {}): Promise<any> {
+        const stream = await this.prepareMyTradesSubscription (symbol, params);
+        return await this.startSubscription (stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription']);
+    }
+
+    async preparePositionsSubscription (symbols: Strings = undefined, params: Dict = {}): Promise<Dict> {
+        throw new NotSupported (this.id + ' startPositions() is not supported');
+    }
+
+    async startPositions (symbols: Strings = undefined, params: Dict = {}): Promise<any> {
+        const stream = await this.preparePositionsSubscription (symbols, params);
+        return await this.startSubscription (stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription']);
     }
 
     async watchPositions (symbols: Strings = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Position[]> {

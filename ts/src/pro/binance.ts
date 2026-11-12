@@ -4410,27 +4410,7 @@ export default class binance extends binanceRest {
         return this.filterBySymbolSinceLimit (orders, symbol, since, limit);
     }
 
-    /**
-     * @method
-     * @name binance#watchOrders
-     * @description watches information on multiple orders made by the user
-     * @see https://developers.binance.com/docs/binance-spot-api-docs/user-data-stream#order-update
-     * @see https://developers.binance.com/docs/margin_trading/trade-data-stream/Event-Order-Update
-     * @see https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams/Event-Order-Update // deprecated
-     * @see https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams#event-order-update
-     * @see https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams/Event-Algo-Order-Update // deprecated
-     * @see https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams#event-algo-order-update
-     * @see https://developers.binance.com/en/docs/catalog/advanced-trading-stocks-trading/api/ws-streams/user-streams#order-report-stream
-     * @param {string} symbol unified market symbol of the market the orders were made in
-     * @param {int} [since] the earliest time in ms to fetch orders for
-     * @param {int} [limit] the maximum number of order structures to retrieve
-     * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @param {boolean} [params.stock] set to true to use stocks user data streams
-     * @param {string|undefined} [params.marginMode] 'cross' or 'isolated', for spot margin
-     * @param {boolean} [params.portfolioMargin] set to true if you would like to watch portfolio margin account orders
-     * @returns {object[]} a list of [order structures]{@link https://docs.ccxt.com/?id=order-structure}
-     */
-    override async watchOrders (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Order[]> {
+    override async prepareOrdersSubscription (symbol: Str = undefined, params: Dict = {}): Promise<Dict> {
         if (this.markets === undefined) {
             await this.loadMarkets ();
         }
@@ -4460,12 +4440,7 @@ export default class binance extends binanceRest {
             const stockSubscribe: Dict = {
                 'id': stockRequestId,
             };
-            const stockOrders: ArrayCache = await this.watch (stockUrl, stockMessageHash, this.extend (stockRequest, stockQuery), stockMessageHash, stockSubscribe);
-            let stockLimit: Int = limit;
-            if (this.newUpdates) {
-                stockLimit = stockOrders.getLimit (symbol, limit);
-            }
-            return this.filterBySymbolSinceLimit (stockOrders, symbol, since, stockLimit, true);
+            return { 'url': stockUrl, 'messageHash': stockMessageHash, 'message': this.extend (stockRequest, stockQuery), 'subscribeHashes': [ stockMessageHash ], 'subscription': stockSubscribe, 'symbol': symbol };
         }
         let messageHash = 'orders';
         let market: Market = undefined;
@@ -4503,7 +4478,33 @@ export default class binance extends binanceRest {
         this.setBalanceCache (client, type, isPortfolioMargin);
         this.setPositionsCache (client, type, undefined, isPortfolioMargin);
         const message = undefined;
-        const orders: ArrayCache = await this.watch (url, messageHash, message, type);
+        return { 'url': url, 'messageHash': messageHash, 'message': message, 'subscribeHashes': [ type ], 'subscription': undefined, 'symbol': symbolResolved };
+    }
+
+    /**
+     * @method
+     * @name binance#watchOrders
+     * @description watches information on multiple orders made by the user
+     * @see https://developers.binance.com/docs/binance-spot-api-docs/user-data-stream#order-update
+     * @see https://developers.binance.com/docs/margin_trading/trade-data-stream/Event-Order-Update
+     * @see https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams/Event-Order-Update // deprecated
+     * @see https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams#event-order-update
+     * @see https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams/Event-Algo-Order-Update // deprecated
+     * @see https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams#event-algo-order-update
+     * @see https://developers.binance.com/en/docs/catalog/advanced-trading-stocks-trading/api/ws-streams/user-streams#order-report-stream
+     * @param {string} symbol unified market symbol of the market the orders were made in
+     * @param {int} [since] the earliest time in ms to fetch orders for
+     * @param {int} [limit] the maximum number of order structures to retrieve
+     * @param {object} [params] extra parameters specific to the exchange API endpoint
+     * @param {boolean} [params.stock] set to true to use stocks user data streams
+     * @param {string|undefined} [params.marginMode] 'cross' or 'isolated', for spot margin
+     * @param {boolean} [params.portfolioMargin] set to true if you would like to watch portfolio margin account orders
+     * @returns {object[]} a list of [order structures]{@link https://docs.ccxt.com/?id=order-structure}
+     */
+    override async watchOrders (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Order[]> {
+        const stream = await this.prepareOrdersSubscription (symbol, params);
+        const symbolResolved = stream['symbol'];
+        const orders: ArrayCache = await this.watch (stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription']);
         let limitResolved: Int = limit;
         if (this.newUpdates) {
             limitResolved = orders.getLimit (symbolResolved, limit);
@@ -5077,18 +5078,7 @@ export default class binance extends binanceRest {
         }
     }
 
-    /**
-     * @method
-     * @name binance#watchPositions
-     * @description watch all open positions
-     * @param {string[]|undefined} symbols list of unified market symbols
-     * @param {number} [since] since timestamp
-     * @param {number} [limit] limit
-     * @param {object} params extra parameters specific to the exchange API endpoint
-     * @param {boolean} [params.portfolioMargin] set to true if you would like to watch positions in a portfolio margin account
-     * @returns {object[]} a list of [position structure]{@link https://docs.ccxt.com/en/latest/manual.html#position-structure}
-     */
-    override async watchPositions (symbols: Strings = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Position[]> {
+    override async preparePositionsSubscription (symbols: Strings = undefined, params: Dict = {}): Promise<Dict> {
         if (this.markets === undefined) {
             await this.loadMarkets ();
         }
@@ -5140,15 +5130,32 @@ export default class binance extends binanceRest {
         const fetchPositionsSnapshot = this.handleOption ('watchPositions', 'fetchPositionsSnapshot', true);
         const awaitPositionsSnapshot = this.handleOption ('watchPositions', 'awaitPositionsSnapshot', true);
         const cache = this.safeValue (this.positions, type);
-        if ((fetchPositionsSnapshot === true) && (awaitPositionsSnapshot === true) && (cache === undefined)) {
-            const snapshot = await client.future (type + ':fetchPositionsSnapshot');
+        return { 'url': url, 'messageHash': messageHash, 'message': undefined, 'subscribeHashes': [ type ], 'subscription': undefined, 'symbols': symbolsNormalized, 'cache': cache, 'awaitSnapshot': (fetchPositionsSnapshot === true) && (awaitPositionsSnapshot === true) && (cache === undefined), 'snapshotHash': type + ':fetchPositionsSnapshot' };
+    }
+
+    /**
+     * @method
+     * @name binance#watchPositions
+     * @description watch all open positions
+     * @param {string[]|undefined} symbols list of unified market symbols
+     * @param {number} [since] since timestamp
+     * @param {number} [limit] limit
+     * @param {object} params extra parameters specific to the exchange API endpoint
+     * @param {boolean} [params.portfolioMargin] set to true if you would like to watch positions in a portfolio margin account
+     * @returns {object[]} a list of [position structure]{@link https://docs.ccxt.com/en/latest/manual.html#position-structure}
+     */
+    override async watchPositions (symbols: Strings = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Position[]> {
+        const stream = await this.preparePositionsSubscription (symbols, params);
+        const symbolsNormalized = stream['symbols'];
+        if (stream['awaitSnapshot']) {
+            const snapshot = await this.client (stream['url']).future (stream['snapshotHash']);
             return this.filterBySymbolsSinceLimit (snapshot, symbolsNormalized, since, limit, true);
         }
-        const newPositions = await this.watch (url, messageHash, undefined, type);
+        const newPositions = await this.watch (stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription']);
         if (this.newUpdates) {
             return newPositions;
         }
-        return this.filterBySymbolsSinceLimit (cache, symbolsNormalized, since, limit, true);
+        return this.filterBySymbolsSinceLimit (stream['cache'], symbolsNormalized, since, limit, true);
     }
 
     setPositionsCache (client: Client, type: string, symbols: Strings = undefined, isPortfolioMargin: boolean = false) {
@@ -5526,18 +5533,7 @@ export default class binance extends binanceRest {
         client.resolve (trades, messageHash);
     }
 
-    /**
-     * @method
-     * @name binance#watchMyTrades
-     * @description watches information on multiple trades made by the user
-     * @param {string} symbol unified market symbol of the market orders were made in
-     * @param {int} [since] the earliest time in ms to fetch orders for
-     * @param {int} [limit] the maximum number of order structures to retrieve
-     * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @param {boolean} [params.portfolioMargin] set to true if you would like to watch trades in a portfolio margin account
-     * @returns {object[]} a list of [trade structures]{@link https://docs.ccxt.com/?id=trade-structure}
-     */
-    override async watchMyTrades (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Trade[]> {
+    override async prepareMyTradesSubscription (symbol: Str = undefined, params: Dict = {}): Promise<Dict> {
         if (this.markets === undefined) {
             await this.loadMarkets ();
         }
@@ -5580,7 +5576,24 @@ export default class binance extends binanceRest {
         this.setBalanceCache (client, type, isPortfolioMargin);
         this.setPositionsCache (client, type, undefined, isPortfolioMargin);
         const message = undefined;
-        const trades: ArrayCache = await this.watch (url, messageHash, message, type);
+        return { 'url': url, 'messageHash': messageHash, 'message': message, 'subscribeHashes': [ type ], 'subscription': undefined, 'symbol': symbolResolved };
+    }
+
+    /**
+     * @method
+     * @name binance#watchMyTrades
+     * @description watches information on multiple trades made by the user
+     * @param {string} symbol unified market symbol of the market orders were made in
+     * @param {int} [since] the earliest time in ms to fetch orders for
+     * @param {int} [limit] the maximum number of order structures to retrieve
+     * @param {object} [params] extra parameters specific to the exchange API endpoint
+     * @param {boolean} [params.portfolioMargin] set to true if you would like to watch trades in a portfolio margin account
+     * @returns {object[]} a list of [trade structures]{@link https://docs.ccxt.com/?id=trade-structure}
+     */
+    override async watchMyTrades (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Trade[]> {
+        const stream = await this.prepareMyTradesSubscription (symbol, params);
+        const symbolResolved = stream['symbol'];
+        const trades: ArrayCache = await this.watch (stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription']);
         let limitResolved: Int = limit;
         if (this.newUpdates) {
             limitResolved = trades.getLimit (symbolResolved, limit);

@@ -5,4 +5,5 @@ export interface FutureInterface extends Promise<any> {
 export declare function Future(): FutureInterface;
 export declare namespace Future {
     var race: (futures: any) => FutureInterface;
+    var raceAsync: (futures: any) => FutureInterface;
 }

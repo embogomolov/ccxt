@@ -1,5 +1,5 @@
 import { RequestTimeout, NetworkError, NotSupported, BaseError, ExchangeClosedByUser } from '../../base/errors.js';
-import { Future } from './Future.js';
+import { Future, type FutureInterface } from './Future.js';
 
 import {
     isNode,
@@ -32,6 +32,10 @@ const bunHasNativePing = isBun && (typeof (globalThis as any).WebSocket !== 'und
 const hasPing = usesNodeWsPackage || bunHasNativePing;
 
 export default class Client {
+    subscriptionTasks: Dictionary<Promise<void>> = {}
+    pendingSubscriptionTasks: Set<Promise<void>> = new Set ()
+    subscriptionsStopped = false
+    subscriptionClosed: FutureInterface = Future ()
     connected: Promise<any>
 
     // @ts-ignore: 2564
@@ -126,6 +130,7 @@ export default class Client {
         Object.assign (this, deepExtend (defaults, config))
         // connection-related Future
         this.connected = Future ()
+        this.subscriptionClosed.catch (() => {});
     }
 
     reusableFuture (messageHash: string) {
@@ -306,6 +311,11 @@ export default class Client {
         }
     }
 
+    stopSubscriptions (error: any) {
+        this.subscriptionsStopped = true;
+        this.subscriptionClosed.reject (error);
+    }
+
     onError (error: any) {
         if (this.verbose) {
             this.log (new Date (), 'onError', error.message, '|', this.url)
@@ -315,12 +325,14 @@ export default class Client {
             error = new NetworkError (error.message)
         }
         this.error = error
+        this.stopSubscriptions (error);
         this.reset (this.error)
         this.onErrorCallback (this, this.error)
     }
 
     /* eslint-disable no-shadow */
     onClose (event: any) {
+        this.stopSubscriptions (this.error || new NetworkError ('WebSocket connection is closed'));
         if (this.verbose) {
             this.log (new Date (), 'onClose', event, '|', this.url)
         }

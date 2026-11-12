@@ -3993,27 +3993,7 @@ class binance(ccxt.async_support.binance):
         orders = await self.watch(url, messageHash, message, messageHash, subscription)
         return self.filter_by_symbol_since_limit(orders, symbol, since, limit)
 
-    async def watch_orders(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Order]:
-        """
-        watches information on multiple orders made by the user
-
-        https://developers.binance.com/docs/binance-spot-api-docs/user-data-stream#order-update
-        https://developers.binance.com/docs/margin_trading/trade-data-stream/Event-Order-Update
-        https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams/Event-Order-Update  # deprecated
-        https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams#event-order-update
-        https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams/Event-Algo-Order-Update  # deprecated
-        https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams#event-algo-order-update
-        https://developers.binance.com/en/docs/catalog/advanced-trading-stocks-trading/api/ws-streams/user-streams#order-report-stream
-
-        :param str symbol: unified market symbol of the market the orders were made in
-        :param int [since]: the earliest time in ms to fetch orders for
-        :param int [limit]: the maximum number of order structures to retrieve
-        :param dict [params]: extra parameters specific to the exchange API endpoint
-        :param boolean [params.stock]: set to True to use stocks user data streams
-        :param str|None [params.marginMode]: 'cross' or 'isolated', for spot margin
-        :param boolean [params.portfolioMargin]: set to True if you would like to watch portfolio margin account orders
-        :returns dict[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
-        """
+    async def prepare_orders_subscription(self, symbol: Str = None, params: dict = {}) -> dict:
         if self.markets is None:
             await self.load_markets()
         stock, paramsStock = self.handle_option_bool_and_params(params, 'watchOrders', 'stock', False)
@@ -4040,11 +4020,7 @@ class binance(ccxt.async_support.binance):
             stockSubscribe = {
                 'id': stockRequestId,
             }
-            stockOrders = await self.watch(stockUrl, stockMessageHash, self.extend(stockRequest, stockQuery), stockMessageHash, stockSubscribe)
-            stockLimit = limit
-            if self.newUpdates:
-                stockLimit = stockOrders.getLimit(symbol, limit)
-            return self.filter_by_symbol_since_limit(stockOrders, symbol, since, stockLimit, True)
+            return {'url': stockUrl, 'messageHash': stockMessageHash, 'message': self.extend(stockRequest, stockQuery), 'subscribeHashes': [stockMessageHash], 'subscription': stockSubscribe, 'symbol': symbol}
         messageHash = 'orders'
         market = None
         symbolResolved = self.symbol(symbol) if (symbol is not None) else symbol
@@ -4076,7 +4052,32 @@ class binance(ccxt.async_support.binance):
         self.set_balance_cache(client, type, isPortfolioMargin)
         self.set_positions_cache(client, type, None, isPortfolioMargin)
         message = None
-        orders = await self.watch(url, messageHash, message, type)
+        return {'url': url, 'messageHash': messageHash, 'message': message, 'subscribeHashes': [type], 'subscription': None, 'symbol': symbolResolved}
+
+    async def watch_orders(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Order]:
+        """
+        watches information on multiple orders made by the user
+
+        https://developers.binance.com/docs/binance-spot-api-docs/user-data-stream#order-update
+        https://developers.binance.com/docs/margin_trading/trade-data-stream/Event-Order-Update
+        https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams/Event-Order-Update  # deprecated
+        https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams#event-order-update
+        https://developers.binance.com/docs/derivatives/usds-margined-futures/user-data-streams/Event-Algo-Order-Update  # deprecated
+        https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/user-data-streams#event-algo-order-update
+        https://developers.binance.com/en/docs/catalog/advanced-trading-stocks-trading/api/ws-streams/user-streams#order-report-stream
+
+        :param str symbol: unified market symbol of the market the orders were made in
+        :param int [since]: the earliest time in ms to fetch orders for
+        :param int [limit]: the maximum number of order structures to retrieve
+        :param dict [params]: extra parameters specific to the exchange API endpoint
+        :param boolean [params.stock]: set to True to use stocks user data streams
+        :param str|None [params.marginMode]: 'cross' or 'isolated', for spot margin
+        :param boolean [params.portfolioMargin]: set to True if you would like to watch portfolio margin account orders
+        :returns dict[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
+        """
+        stream = await self.prepare_orders_subscription(symbol, params)
+        symbolResolved = stream['symbol']
+        orders = await self.watch(stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription'])
         limitResolved = limit
         if self.newUpdates:
             limitResolved = orders.getLimit(symbolResolved, limit)
@@ -4619,16 +4620,7 @@ class binance(ccxt.async_support.binance):
                 }
                 self.handle_my_trade(client, normalizedTrade)
 
-    async def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Position]:
-        """
-        watch all open positions
-        :param str[]|None symbols: list of unified market symbols
-        :param number [since]: since timestamp
-        :param number [limit]: limit
-        :param dict params: extra parameters specific to the exchange API endpoint
-        :param boolean [params.portfolioMargin]: set to True if you would like to watch positions in a portfolio margin account
-        :returns dict[]: a list of `position structure <https://docs.ccxt.com/en/latest/manual.html#position-structure>`
-        """
+    async def prepare_positions_subscription(self, symbols: Strings = None, params: dict = {}) -> dict:
         if self.markets is None:
             await self.load_markets()
         market = None
@@ -4674,13 +4666,27 @@ class binance(ccxt.async_support.binance):
         fetchPositionsSnapshot = self.handle_option('watchPositions', 'fetchPositionsSnapshot', True)
         awaitPositionsSnapshot = self.handle_option('watchPositions', 'awaitPositionsSnapshot', True)
         cache = self.safe_value(self.positions, type)
-        if (fetchPositionsSnapshot is True) and (awaitPositionsSnapshot is True) and (cache is None):
-            snapshot = await client.future(type + ':fetchPositionsSnapshot')
+        return {'url': url, 'messageHash': messageHash, 'message': None, 'subscribeHashes': [type], 'subscription': None, 'symbols': symbolsNormalized, 'cache': cache, 'awaitSnapshot': (fetchPositionsSnapshot is True) and (awaitPositionsSnapshot is True) and (cache is None), 'snapshotHash': type + ':fetchPositionsSnapshot'}
+
+    async def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Position]:
+        """
+        watch all open positions
+        :param str[]|None symbols: list of unified market symbols
+        :param number [since]: since timestamp
+        :param number [limit]: limit
+        :param dict params: extra parameters specific to the exchange API endpoint
+        :param boolean [params.portfolioMargin]: set to True if you would like to watch positions in a portfolio margin account
+        :returns dict[]: a list of `position structure <https://docs.ccxt.com/en/latest/manual.html#position-structure>`
+        """
+        stream = await self.prepare_positions_subscription(symbols, params)
+        symbolsNormalized = stream['symbols']
+        if stream['awaitSnapshot']:
+            snapshot = await self.client(stream['url']).future(stream['snapshotHash'])
             return self.filter_by_symbols_since_limit(snapshot, symbolsNormalized, since, limit, True)
-        newPositions = await self.watch(url, messageHash, None, type)
+        newPositions = await self.watch(stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription'])
         if self.newUpdates:
             return newPositions
-        return self.filter_by_symbols_since_limit(cache, symbolsNormalized, since, limit, True)
+        return self.filter_by_symbols_since_limit(stream['cache'], symbolsNormalized, since, limit, True)
 
     def set_positions_cache(self, client: Client, type: str, symbols: Strings = None, isPortfolioMargin: bool = False):
         if type == 'spot':
@@ -5019,16 +5025,7 @@ class binance(ccxt.async_support.binance):
         trades = self.parse_trades(result)
         client.resolve(trades, messageHash)
 
-    async def watch_my_trades(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Trade]:
-        """
-        watches information on multiple trades made by the user
-        :param str symbol: unified market symbol of the market orders were made in
-        :param int [since]: the earliest time in ms to fetch orders for
-        :param int [limit]: the maximum number of order structures to retrieve
-        :param dict [params]: extra parameters specific to the exchange API endpoint
-        :param boolean [params.portfolioMargin]: set to True if you would like to watch trades in a portfolio margin account
-        :returns dict[]: a list of `trade structures <https://docs.ccxt.com/?id=trade-structure>`
-        """
+    async def prepare_my_trades_subscription(self, symbol: Str = None, params: dict = {}) -> dict:
         if self.markets is None:
             await self.load_markets()
         market = None
@@ -5064,7 +5061,21 @@ class binance(ccxt.async_support.binance):
         self.set_balance_cache(client, type, isPortfolioMargin)
         self.set_positions_cache(client, type, None, isPortfolioMargin)
         message = None
-        trades = await self.watch(url, messageHash, message, type)
+        return {'url': url, 'messageHash': messageHash, 'message': message, 'subscribeHashes': [type], 'subscription': None, 'symbol': symbolResolved}
+
+    async def watch_my_trades(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Trade]:
+        """
+        watches information on multiple trades made by the user
+        :param str symbol: unified market symbol of the market orders were made in
+        :param int [since]: the earliest time in ms to fetch orders for
+        :param int [limit]: the maximum number of order structures to retrieve
+        :param dict [params]: extra parameters specific to the exchange API endpoint
+        :param boolean [params.portfolioMargin]: set to True if you would like to watch trades in a portfolio margin account
+        :returns dict[]: a list of `trade structures <https://docs.ccxt.com/?id=trade-structure>`
+        """
+        stream = await self.prepare_my_trades_subscription(symbol, params)
+        symbolResolved = stream['symbol']
+        trades = await self.watch(stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription'])
         limitResolved = limit
         if self.newUpdates:
             limitResolved = trades.getLimit(symbolResolved, limit)

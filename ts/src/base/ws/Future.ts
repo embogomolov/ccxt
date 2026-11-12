@@ -89,46 +89,81 @@ export function Future (): FutureInterface {
     return p
 }
 
-// coerces a plain promise/thenable into a Future so it can participate
-// in a synchronous-subscription race. Note: the coercion attaches a
-// one-time .then to the input, so repeatedly racing the SAME long-lived
-// plain promise would accumulate handlers on it - always pass real
-// Futures (client.future(...)) on hot paths. All ccxt-internal callers do.
+const pendingPromiseFutures = new WeakMap<Promise<any>, FutureInterface> ()
+
 function asFuture (value): FutureInterface {
     if (value && (typeof value.subscribe === 'function')) {
         return value
     }
-    const f = Future ()
-    Promise.resolve (value).then (f.resolve, f.reject)
-    return f
+    return asPromiseFuture (value)
 }
 
-Future.race = (futures) : FutureInterface => {
-    // all inputs are subscribed synchronously, so the raced future settles
-    // in the same tick as the winner (zero extra microtask hops on the
-    // message delivery path)
-    const p = Future ()
+function asPromiseFuture (value): FutureInterface {
+    const promise = Promise.resolve (value)
+    const cached = pendingPromiseFutures.get (promise)
+    if (cached !== undefined) {
+        return cached
+    }
+    const future = Future ()
+    pendingPromiseFutures.set (promise, future)
+    try {
+        promise.then ((result) => {
+            // Удаление до уведомления сохраняет асинхронность повторного наблюдения из callback.
+            pendingPromiseFutures.delete (promise)
+            future.resolve (result)
+        }, (error) => {
+            pendingPromiseFutures.delete (promise)
+            future.reject (error)
+        })
+    } catch (error) {
+        if (pendingPromiseFutures.get (promise) === future) {
+            pendingPromiseFutures.delete (promise)
+        }
+        throw error
+    }
+    return future
+}
+
+function raceFutures (futures, toFuture): FutureInterface {
+    const result = Future ()
     const unsubscribers = []
     let done = false
+    const detach = () => {
+        for (const unsubscribe of unsubscribers) {
+            unsubscribe ()
+        }
+        unsubscribers.length = 0
+    }
     const settleWith = (settler) => (value) => {
         if (done) {
             return
         }
         done = true
-        // detach from all raced futures so pending ones do not
-        // accumulate dead handlers across repeated race() calls
-        for (let i = 0; i < unsubscribers.length; i++) {
-            unsubscribers[i] ()
-        }
+        detach ()
         settler (value)
     }
-    const onFulfil = settleWith (p.resolve)
-    const onReject = settleWith (p.reject)
-    for (let i = 0; i < futures.length; i++) {
-        unsubscribers.push (asFuture (futures[i]).subscribe (onFulfil, onReject))
-        if (done) {
-            break // an already-settled future won the race synchronously
+    const onFulfil = settleWith (result.resolve)
+    const onReject = settleWith (result.reject)
+    result.resolve = onFulfil
+    result.reject = onReject
+    try {
+        for (const future of futures) {
+            const unsubscribe = toFuture (future).subscribe (onFulfil, onReject)
+            if (done) {
+                unsubscribe ()
+                break
+            }
+            unsubscribers.push (unsubscribe)
         }
+    } catch (error) {
+        done = true
+        detach ()
+        throw error
     }
-    return p
+    return result
 }
+
+Future.race = (futures): FutureInterface => raceFutures (futures, asFuture)
+
+// Нативное состояние Promise учитывает принятие другого Promise, в отличие от синхронного канала Future.
+Future.raceAsync = (futures): FutureInterface => raceFutures (futures, asPromiseFuture)

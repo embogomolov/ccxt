@@ -117,6 +117,7 @@ export default class bingx extends bingxRest {
      * @returns {int[][]} A list of candles ordered as timestamp, open, high, low, close, volume
      */
     unWatchOHLCV(symbol: string, timeframe?: string, params?: Dict): Promise<any>;
+    prepareOrdersSubscription(symbol?: Str, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name bingx#watchOrders
@@ -131,6 +132,7 @@ export default class bingx extends bingxRest {
      * @returns {object[]} a list of [order structures]{@link https://docs.ccxt.com/?id=order-structure}
      */
     watchOrders(symbol?: Str, since?: Int, limit?: Int, params?: Dict): Promise<Order[]>;
+    prepareMyTradesSubscription(symbol?: Str, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name bingx#watchMyTrades
@@ -158,6 +160,7 @@ export default class bingx extends bingxRest {
     watchBalance(params?: Dict): Promise<Balances>;
     setBalanceCache(client: Client, type: string, subType: Str, subscriptionHash: string, params: Dict): void;
     loadBalanceSnapshot(client: Client, messageHash: string, type: string, subType: Str): Promise<void>;
+    preparePositionsSubscription(symbols?: Strings, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name bingx#watchPositions

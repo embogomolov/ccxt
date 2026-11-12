@@ -478,6 +478,11 @@ export declare class BaseExchange {
     ping(client: Client): Dict | Str;
     client(url: Str): WsClient;
     calculateWsBackoffDelay(url: string): number;
+    scheduleSubscription(client: WsClient, url: string, message: any, subscribeHashes: Strings, subscription: any, backoffDelay: number): {
+        connected: Promise<any>;
+        pending: Promise<void>[];
+    };
+    startSubscription(url: string, message?: any, subscribeHashes?: Strings, subscription?: any): Promise<void>;
     watchMultiple(url: Str, messageHashes: string[], message?: any, subscribeHashes?: Strings, subscription?: any): FutureInterface;
     watch(url: Str, messageHash: Str, message?: any, subscribeHash?: any, subscription?: any): any;
     onConnected(client: any, message?: any): void;
@@ -823,6 +828,11 @@ export declare class BaseExchange {
     getSymbolsForMarketType(marketType?: Str, subType?: Str, symbolWithActiveStatus?: boolean, symbolWithUnknownStatus?: boolean): string[];
     filterByArray(objects: any, key: IndexType, values?: any, indexed?: boolean): any;
     filterOutByArray(objects: any, key: IndexType, values?: any, indexed?: boolean): any;
+    /**
+     * @ignore
+     * @description ожидает разрешение перед подписью каждой REST-попытки
+     */
+    beforeRestRequest(path: any, api?: any, method?: string, params?: {}, headers?: any, body?: any, config?: {}): Promise<undefined>;
     fetch2(path: string, api?: string[], method?: string, params?: Dict, config?: Dict): Promise<any>;
     request(path: string, api?: string[], method?: string, params?: Dict, config?: Dict): Promise<any>;
     loadAccounts(reload?: boolean, params?: Dict): Promise<Account[]>;
@@ -1117,6 +1127,12 @@ export default class Exchange extends BaseExchange {
     editOrder(id: string, symbol: string, type: OrderType, side: OrderSide, amount?: Num, price?: Num, params?: Dict): Promise<Order>;
     editOrderWithClientOrderId(clientOrderId: string, symbol: string, type: OrderType, side: OrderSide, amount?: Num, price?: Num, params?: Dict): Promise<Order>;
     fetchPosition(symbol: string, params?: Dict): Promise<Position>;
+    prepareOrdersSubscription(symbol?: Str, params?: Dict): Promise<Dict>;
+    startOrders(symbol?: Str, params?: Dict): Promise<any>;
+    prepareMyTradesSubscription(symbol?: Str, params?: Dict): Promise<Dict>;
+    startMyTrades(symbol?: Str, params?: Dict): Promise<any>;
+    preparePositionsSubscription(symbols?: Strings, params?: Dict): Promise<Dict>;
+    startPositions(symbols?: Strings, params?: Dict): Promise<any>;
     watchPositions(symbols?: Strings, since?: Int, limit?: Int, params?: Dict): Promise<Position[]>;
     watchPositionForSymbols(symbols?: Strings, since?: Int, limit?: Int, params?: Dict): Promise<Position[]>;
     fetchPositions(symbols?: Strings, params?: Dict): Promise<Position[]>;

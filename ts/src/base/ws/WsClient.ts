@@ -154,6 +154,7 @@ export default class WsClient extends Client {
     }
 
     override close () {
+        this.stopSubscriptions (this.error || new ExchangeClosedByUser ('connection closed by the user'));
         if (this.connection instanceof WebSocketPlatform) {
             if (this.disconnected === undefined) {
                 this.disconnected = Future ();
@@ -166,7 +167,11 @@ export default class WsClient extends Client {
             // as Client.reset
             this.reset (this.error !== undefined ? this.error : new ExchangeClosedByUser ('connection closed by the user'));
         }
-        return this.disconnected;
+        const completion = Future ();
+        Promise.allSettled (Array.from (this.pendingSubscriptionTasks))
+            .then (() => this.disconnected)
+            .then ((result) => completion.resolve (result), (error) => completion.reject (error));
+        return completion;
     }
 
 }

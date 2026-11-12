@@ -1,6 +1,10 @@
-import { Future } from './Future.js';
+import { Future, type FutureInterface } from './Future.js';
 import { Dictionary, Str } from '../types.js';
 export default class Client {
+    subscriptionTasks: Dictionary<Promise<void>>;
+    pendingSubscriptionTasks: Set<Promise<void>>;
+    subscriptionsStopped: boolean;
+    subscriptionClosed: FutureInterface;
     connected: Promise<any>;
     disconnected: ReturnType<typeof Future>;
     futures: Dictionary<any>;
@@ -46,6 +50,7 @@ export default class Client {
     onOpen(): void;
     onPing(): void;
     onPong(): void;
+    stopSubscriptions(error: any): void;
     onError(error: any): void;
     onClose(event: any): void;
     onUpgrade(message: any): void;

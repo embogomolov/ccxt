@@ -8682,6 +8682,27 @@ class Exchange(BaseExchange):
     def fetch_position(self, symbol: str, params: dict = {}):
         raise NotSupported(self.id + ' fetchPosition() is not supported yet')
 
+    def prepare_orders_subscription(self, symbol: Str = None, params: dict = {}):
+        raise NotSupported(self.id + ' startOrders() is not supported')
+
+    def start_orders(self, symbol: Str = None, params: dict = {}):
+        stream = self.prepareOrdersSubscription(symbol, params)
+        return self.start_subscription(stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription'])
+
+    def prepare_my_trades_subscription(self, symbol: Str = None, params: dict = {}):
+        raise NotSupported(self.id + ' startMyTrades() is not supported')
+
+    def start_my_trades(self, symbol: Str = None, params: dict = {}):
+        stream = self.prepareMyTradesSubscription(symbol, params)
+        return self.start_subscription(stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription'])
+
+    def prepare_positions_subscription(self, symbols: Strings = None, params: dict = {}):
+        raise NotSupported(self.id + ' startPositions() is not supported')
+
+    def start_positions(self, symbols: Strings = None, params: dict = {}):
+        stream = self.preparePositionsSubscription(symbols, params)
+        return self.start_subscription(stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription'])
+
     def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params: dict = {}):
         raise NotSupported(self.id + ' watchPositions() is not supported yet')
 

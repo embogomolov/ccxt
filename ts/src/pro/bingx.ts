@@ -992,20 +992,7 @@ export default class bingx extends bingxRest {
         return await this.unWatch (messageHash, subMessageHash, messageHash, subMessageHash, topic, market, methodName, params);
     }
 
-    /**
-     * @method
-     * @name bingx#watchOrders
-     * @description watches information on multiple orders made by the user
-     * @see https://bingx-api.github.io/docs-v3/#/en/Spot/Websocket%20Account%20Data/order%20update%20event
-     * @see https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push
-     * @see https://bingx-api.github.io/docs-v3/#/en/Coin-M%20Futures/Websocket%20Account%20Data/Order%20update%20push
-     * @param {string} [symbol] unified market symbol of the market orders are made in
-     * @param {int} [since] the earliest time in ms to watch orders for
-     * @param {int} [limit] the maximum number of order structures to retrieve
-     * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @returns {object[]} a list of [order structures]{@link https://docs.ccxt.com/?id=order-structure}
-     */
-    override async watchOrders (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Order[]> {
+    override async prepareOrdersSubscription (symbol: Str = undefined, params: Dict = {}): Promise<Dict> {
         if (this.markets === undefined) {
             await this.loadMarkets ();
         }
@@ -1058,7 +1045,27 @@ export default class bingx extends bingxRest {
             'unsubscribe': false,
             'id': uuid,
         };
-        const orders: ArrayCache = await this.watch (url, messageHash, request, subscriptionHash, subscription);
+        return { 'url': url, 'messageHash': messageHash, 'message': request, 'subscribeHashes': [ subscriptionHash ], 'subscription': subscription, 'symbol': symbolResolved };
+    }
+
+    /**
+     * @method
+     * @name bingx#watchOrders
+     * @description watches information on multiple orders made by the user
+     * @see https://bingx-api.github.io/docs-v3/#/en/Spot/Websocket%20Account%20Data/order%20update%20event
+     * @see https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push
+     * @see https://bingx-api.github.io/docs-v3/#/en/Coin-M%20Futures/Websocket%20Account%20Data/Order%20update%20push
+     * @param {string} [symbol] unified market symbol of the market orders are made in
+     * @param {int} [since] the earliest time in ms to watch orders for
+     * @param {int} [limit] the maximum number of order structures to retrieve
+     * @param {object} [params] extra parameters specific to the exchange API endpoint
+     * @returns {object[]} a list of [order structures]{@link https://docs.ccxt.com/?id=order-structure}
+     */
+    override async watchOrders (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Order[]> {
+        const stream = await this.prepareOrdersSubscription (symbol, params);
+        const symbolResolved = stream['symbol'];
+        const messageHash = stream['messageHash'];
+        const orders: ArrayCache = await this.watch (stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription']);
         let limitResolved: Int = limit;
         const queueHashes = this.safeList (this.safeDict (this.options, 'ws', {}), 'messageQueueHashes', []);
         if (this.newUpdates && !this.inArray (messageHash, queueHashes)) {
@@ -1067,20 +1074,7 @@ export default class bingx extends bingxRest {
         return this.filterBySymbolSinceLimit (orders, symbolResolved, since, limitResolved, true);
     }
 
-    /**
-     * @method
-     * @name bingx#watchMyTrades
-     * @description watches information on multiple trades made by the user
-     * @see https://bingx-api.github.io/docs-v3/#/en/Spot/Websocket%20Account%20Data/order%20update%20event
-     * @see https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push
-     * @see https://bingx-api.github.io/docs-v3/#/en/Coin-M%20Futures/Websocket%20Account%20Data/Order%20update%20push
-     * @param {string} [symbol] unified market symbol of the market the trades are made in
-     * @param {int} [since] the earliest time in ms to watch trades for
-     * @param {int} [limit] the maximum number of trade structures to retrieve
-     * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @returns {object[]} a list of [trade structures]{@link https://docs.ccxt.com/?id=trade-structure}
-     */
-    override async watchMyTrades (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Trade[]> {
+    override async prepareMyTradesSubscription (symbol: Str = undefined, params: Dict = {}): Promise<Dict> {
         if (this.markets === undefined) {
             await this.loadMarkets ();
         }
@@ -1133,7 +1127,27 @@ export default class bingx extends bingxRest {
             'unsubscribe': false,
             'id': uuid,
         };
-        const trades: ArrayCache = await this.watch (url, messageHash, request, subscriptionHash, subscription);
+        return { 'url': url, 'messageHash': messageHash, 'message': request, 'subscribeHashes': [ subscriptionHash ], 'subscription': subscription, 'symbol': symbolResolved };
+    }
+
+    /**
+     * @method
+     * @name bingx#watchMyTrades
+     * @description watches information on multiple trades made by the user
+     * @see https://bingx-api.github.io/docs-v3/#/en/Spot/Websocket%20Account%20Data/order%20update%20event
+     * @see https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push
+     * @see https://bingx-api.github.io/docs-v3/#/en/Coin-M%20Futures/Websocket%20Account%20Data/Order%20update%20push
+     * @param {string} [symbol] unified market symbol of the market the trades are made in
+     * @param {int} [since] the earliest time in ms to watch trades for
+     * @param {int} [limit] the maximum number of trade structures to retrieve
+     * @param {object} [params] extra parameters specific to the exchange API endpoint
+     * @returns {object[]} a list of [trade structures]{@link https://docs.ccxt.com/?id=trade-structure}
+     */
+    override async watchMyTrades (symbol: Str = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Trade[]> {
+        const stream = await this.prepareMyTradesSubscription (symbol, params);
+        const symbolResolved = stream['symbol'];
+        const messageHash = stream['messageHash'];
+        const trades: ArrayCache = await this.watch (stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription']);
         let limitResolved: Int = limit;
         const queueHashes = this.safeList (this.safeDict (this.options, 'ws', {}), 'messageQueueHashes', []);
         if (this.newUpdates && !this.inArray (messageHash, queueHashes)) {
@@ -1235,18 +1249,7 @@ export default class bingx extends bingxRest {
         }
     }
 
-    /**
-     * @method
-     * @name bingx#watchPositions
-     * @description watch all open positions
-     * @see https://bingx-api.github.io/docs/#/en-us/swapV2/socket/account.html#Account%20balance%20and%20position%20update%20push
-     * @param {string[]|undefined} [symbols] list of unified market symbols
-     * @param {int} [since] the earliest time in ms to fetch positions for
-     * @param {int} [limit] the maximum number of position structures to retrieve
-     * @param {object} [params] extra parameters specific to the exchange API endpoint
-     * @returns {object[]} a list of [position structure]{@link https://docs.ccxt.com/en/latest/manual.html#position-structure}
-     */
-    override async watchPositions (symbols: Strings = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Position[]> {
+    override async preparePositionsSubscription (symbols: Strings = undefined, params: Dict = {}): Promise<Dict> {
         if (this.markets === undefined) {
             await this.loadMarkets ();
         }
@@ -1283,11 +1286,28 @@ export default class bingx extends bingxRest {
             'unsubscribe': false,
             'id': uuid,
         };
-        if (fetchPositionsSnapshot && awaitPositionsSnapshot && this.positions === undefined) {
-            const snapshot = await client.future (type + ':fetchPositionsSnapshot');
+        return { 'url': url, 'messageHash': messageHash, 'message': undefined, 'subscribeHashes': [ subscriptionHash ], 'subscription': subscription, 'symbols': symbolsNormalized, 'cache': this.positions, 'awaitSnapshot': (fetchPositionsSnapshot === true) && (awaitPositionsSnapshot === true) && (this.positions === undefined), 'snapshotHash': type + ':fetchPositionsSnapshot' };
+    }
+
+    /**
+     * @method
+     * @name bingx#watchPositions
+     * @description watch all open positions
+     * @see https://bingx-api.github.io/docs/#/en-us/swapV2/socket/account.html#Account%20balance%20and%20position%20update%20push
+     * @param {string[]|undefined} [symbols] list of unified market symbols
+     * @param {int} [since] the earliest time in ms to fetch positions for
+     * @param {int} [limit] the maximum number of position structures to retrieve
+     * @param {object} [params] extra parameters specific to the exchange API endpoint
+     * @returns {object[]} a list of [position structure]{@link https://docs.ccxt.com/en/latest/manual.html#position-structure}
+     */
+    override async watchPositions (symbols: Strings = undefined, since: Int = undefined, limit: Int = undefined, params: Dict = {}): Promise<Position[]> {
+        const stream = await this.preparePositionsSubscription (symbols, params);
+        const symbolsNormalized = stream['symbols'];
+        if (stream['awaitSnapshot']) {
+            const snapshot = await this.client (stream['url']).future (stream['snapshotHash']);
             return this.filterBySymbolsSinceLimit (snapshot, symbolsNormalized, since, limit, true);
         }
-        const newPositions = await this.watch (url, messageHash, undefined, subscriptionHash, subscription);
+        const newPositions = await this.watch (stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription']);
         if (this.newUpdates) {
             return newPositions;
         }

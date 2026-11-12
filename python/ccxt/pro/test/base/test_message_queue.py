@@ -256,3 +256,143 @@ if __name__ == '__main__':
     asyncio.run(test_message_queue_lifecycle())
     asyncio.run(test_bingx_private_batches())
     asyncio.run(test_bingx_private_batches(str))
+
+
+async def test_private_stream_start():
+    from ccxt.async_support.base.ws.cache import ArrayCacheBySymbolById
+
+    async def authenticate(*args, **kwargs):
+        return None
+
+    for exchange_class in (ccxtpro.bybit, ccxtpro.binance, ccxtpro.bingx):
+        for suffix in ('orders', 'my_trades', 'positions'):
+            owner = exchange_class({'newUpdates': True, 'enableRateLimit': False})
+            owner.newUpdates = True
+            owner.markets = {}
+            owner.authenticate = authenticate
+            owner.options.update({
+                'defaultType': 'swap', 'defaultSubType': 'linear',
+                'listenKey': 'offline', 'linear': {'listenKey': 'offline'},
+                'future': {'listenKey': 'offline'},
+                'watchPositions': {'fetchPositionsSnapshot': False, 'awaitPositionsSnapshot': False},
+            })
+            url = 'wss://example.invalid/private'
+
+            async def market_url(*args, **kwargs):
+                return url
+            owner.get_url_by_market_type = market_url
+            owner.get_private_type = lambda _url: 'unified'
+            owner.get_private_ws_url = lambda *args: url
+            owner.set_balance_cache = lambda *args: None
+            if owner.id == 'bingx':
+                url = owner.urls['api']['ws']['linear'] + '?listenKey=offline'
+            client = owner.client(url)
+            client.connected.resolve(url)
+            sent = []
+
+            async def send(message):
+                sent.append(message)
+            client.send = send
+            try:
+                preparation = await getattr(owner, 'prepare_' + suffix + '_subscription')()
+                message_hash = preparation.get('messageHash') or preparation['messageHashes'][0]
+                client.messageQueueHashes = {message_hash}
+                client.messageQueueCapacity = 10
+                cached = ArrayCacheBySymbolById(10)
+                cached.append({'id': 'first', 'symbol': 'BTC/USDT:USDT', 'side': 'long'})
+                client.resolve(cached, message_hash)
+                await asyncio.wait_for(getattr(owner, 'start_' + suffix)(), 1)
+                assert message_hash not in client.futures
+                assert client.messageQueueSize == 1
+                first_send_count = len(sent)
+                await asyncio.wait_for(getattr(owner, 'start_' + suffix)(), 1)
+                assert len(sent) == first_send_count
+                assert client.messageQueueSize == 1
+                received = await asyncio.wait_for(getattr(owner, 'watch_' + suffix)(), 1)
+                assert [item['id'] for item in received] == ['first']
+                assert client.messageQueueSize == 0
+                assert len(sent) == first_send_count
+                assert not client.pending_subscription_tasks
+            finally:
+                await owner.close()
+
+
+async def test_subscription_start_lifecycle():
+    from ccxt.async_support.base.exchange import Exchange
+
+    for cancel_caller in (False, True):
+        owner = Exchange()
+        client = create_client(hashes=['orders'])
+        client.connected.resolve(client.url)
+        owner.clients[client.url] = client
+        entered = asyncio.Event()
+        released = asyncio.Event()
+        sent = []
+
+        async def throttle(cost):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                released.set()
+
+        async def send(message):
+            sent.append(message)
+        client.throttle = throttle
+        client.send = send
+        startup = asyncio.create_task(owner.start_subscription(client.url, {'op': 'subscribe'}, ['orders']))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            if cancel_caller:
+                startup.cancel()
+                await asyncio.gather(startup, return_exceptions=True)
+                assert not client.connected.cancelled()
+                assert len(client.pending_subscription_tasks) == 1
+            await asyncio.wait_for(client.close(), 1)
+            assert released.is_set()
+            assert not sent
+            assert not client.pending_subscription_tasks
+            if not cancel_caller:
+                outcome = (await asyncio.gather(startup, return_exceptions=True))[0]
+                assert isinstance(outcome, NetworkError), type(outcome)
+        finally:
+            await owner.close()
+
+    owner = Exchange({'enableRateLimit': False})
+    client = create_client(capacity=1, hashes=['orders'])
+    client.connected.resolve(client.url)
+    owner.clients[client.url] = client
+
+    async def send(message):
+        client.resolve([{'id': 'first'}, {'id': 'second'}], 'orders')
+    client.send = send
+    try:
+        received = await asyncio.wait_for(owner.watch(client.url, 'orders', {'op': 'subscribe'}, 'orders'), 1)
+        assert len(received) == 2
+        assert client.messageQueueError is None
+    finally:
+        await owner.close()
+
+
+async def test_startup_task_cancelled_before_send_step():
+    from ccxt.async_support.base.exchange import Exchange
+
+    owner = Exchange({'enableRateLimit': False})
+    client = create_client(hashes=['orders'])
+    client.connected.resolve(client.url)
+    owner.clients[client.url] = client
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+    client.send = send
+    startup = asyncio.create_task(owner.start_subscription(client.url, {'op': 'subscribe'}, ['orders']))
+    try:
+        await asyncio.sleep(0)
+        await client.close()
+        outcome = (await asyncio.gather(startup, return_exceptions=True))[0]
+        assert isinstance(outcome, NetworkError), type(outcome)
+        assert not sent
+        assert not client.pending_subscription_tasks
+    finally:
+        await owner.close()

@@ -282,6 +282,7 @@ export default class bybit extends bybitRest {
     handleTrades(client: Client, message: Dict): void;
     parseWsTrade(trade: Dict, market?: Market): Trade;
     getPrivateType(url: string): string;
+    prepareMyTradesSubscription(symbol?: Str, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name bybit#watchMyTrades
@@ -311,6 +312,7 @@ export default class bybit extends bybitRest {
      */
     unWatchMyTrades(symbol?: Str, params?: Dict): Promise<any>;
     handleMyTrades(client: Client, message: Dict): void;
+    preparePositionsSubscription(symbols?: Strings, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name bybit#watchPositions
@@ -351,6 +353,7 @@ export default class bybit extends bybitRest {
     watchLiquidations(symbol: string, since?: Int, limit?: Int, params?: Dict): Promise<Liquidation[]>;
     handleLiquidation(client: Client, message: Dict): void;
     parseWsLiquidation(liquidation: NullableDict, market?: Market): Liquidation;
+    prepareOrdersSubscription(symbol?: Str, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name bybit#watchOrders
@@ -387,6 +390,13 @@ export default class bybit extends bybitRest {
     watchBalance(params?: Dict): Promise<Balances>;
     handleBalance(client: Client, message: Dict): void;
     parseWsBalance(balance: Dict, accountType?: Str): void;
+    prepareTopics(url: string, messageHashes: string[], topics: any, params?: Dict): {
+        url: string;
+        messageHashes: string[];
+        message: NullableDict;
+        subscribeHashes: string[];
+        subscription: NullableDict;
+    };
     watchTopics(url: string, messageHashes: string[], topics: any, params?: Dict): Promise<any>;
     unWatchTopics(url: string, topic: string, symbols: Strings, messageHashes: string[], subMessageHashes: string[], topics: any, params?: Dict, subExtension?: Dict): Promise<any>;
     authenticate(url: string, params?: Dict): Promise<any>;

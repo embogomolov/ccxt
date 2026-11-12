@@ -336,8 +336,10 @@ async def test_close_during_ws_throttle(watch_multiple):
 
     async def throttle(cost):
         entered.set()
-        await release.wait()
-        resumed.set()
+        try:
+            await release.wait()
+        finally:
+            resumed.set()
 
     async def send(message):
         sent.append(message)
@@ -356,6 +358,7 @@ async def test_close_during_ws_throttle(watch_multiple):
         release.set()
         await asyncio.wait_for(resumed.wait(), 1)
         assert not sent, 'retired client sends after throttle'
+        assert not client.pending_subscription_tasks
         await asyncio.gather(watcher, return_exceptions=True)
     finally:
         release.set()

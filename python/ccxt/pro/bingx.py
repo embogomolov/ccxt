@@ -931,20 +931,7 @@ class bingx(ccxt.async_support.bingx):
         params['symbolsAndTimeframes'] = symbolsAndTimeframes
         return await self.un_watch(messageHash, subMessageHash, messageHash, subMessageHash, topic, market, methodName, params)
 
-    async def watch_orders(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Order]:
-        """
-        watches information on multiple orders made by the user
-
-        https://bingx-api.github.io/docs-v3/#/en/Spot/Websocket%20Account%20Data/order%20update%20event
-        https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push
-        https://bingx-api.github.io/docs-v3/#/en/Coin-M%20Futures/Websocket%20Account%20Data/Order%20update%20push
-
-        :param str [symbol]: unified market symbol of the market orders are made in
-        :param int [since]: the earliest time in ms to watch orders for
-        :param int [limit]: the maximum number of order structures to retrieve
-        :param dict [params]: extra parameters specific to the exchange API endpoint
-        :returns dict[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
-        """
+    async def prepare_orders_subscription(self, symbol: Str = None, params: dict = {}) -> dict:
         if self.markets is None:
             await self.load_markets()
         await self.authenticate()
@@ -989,27 +976,33 @@ class bingx(ccxt.async_support.bingx):
             'unsubscribe': False,
             'id': uuid,
         }
-        orders = await self.watch(url, messageHash, request, subscriptionHash, subscription)
+        return {'url': url, 'messageHash': messageHash, 'message': request, 'subscribeHashes': [subscriptionHash], 'subscription': subscription, 'symbol': symbolResolved}
+
+    async def watch_orders(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Order]:
+        """
+        watches information on multiple orders made by the user
+
+        https://bingx-api.github.io/docs-v3/#/en/Spot/Websocket%20Account%20Data/order%20update%20event
+        https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push
+        https://bingx-api.github.io/docs-v3/#/en/Coin-M%20Futures/Websocket%20Account%20Data/Order%20update%20push
+
+        :param str [symbol]: unified market symbol of the market orders are made in
+        :param int [since]: the earliest time in ms to watch orders for
+        :param int [limit]: the maximum number of order structures to retrieve
+        :param dict [params]: extra parameters specific to the exchange API endpoint
+        :returns dict[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
+        """
+        stream = await self.prepare_orders_subscription(symbol, params)
+        symbolResolved = stream['symbol']
+        messageHash = stream['messageHash']
+        orders = await self.watch(stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription'])
         limitResolved = limit
         queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
         if self.newUpdates and not self.in_array(messageHash, queueHashes):
             limitResolved = orders.getLimit(symbolResolved, limit)
         return self.filter_by_symbol_since_limit(orders, symbolResolved, since, limitResolved, True)
 
-    async def watch_my_trades(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Trade]:
-        """
-        watches information on multiple trades made by the user
-
-        https://bingx-api.github.io/docs-v3/#/en/Spot/Websocket%20Account%20Data/order%20update%20event
-        https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push
-        https://bingx-api.github.io/docs-v3/#/en/Coin-M%20Futures/Websocket%20Account%20Data/Order%20update%20push
-
-        :param str [symbol]: unified market symbol of the market the trades are made in
-        :param int [since]: the earliest time in ms to watch trades for
-        :param int [limit]: the maximum number of trade structures to retrieve
-        :param dict [params]: extra parameters specific to the exchange API endpoint
-        :returns dict[]: a list of `trade structures <https://docs.ccxt.com/?id=trade-structure>`
-        """
+    async def prepare_my_trades_subscription(self, symbol: Str = None, params: dict = {}) -> dict:
         if self.markets is None:
             await self.load_markets()
         await self.authenticate()
@@ -1054,7 +1047,26 @@ class bingx(ccxt.async_support.bingx):
             'unsubscribe': False,
             'id': uuid,
         }
-        trades = await self.watch(url, messageHash, request, subscriptionHash, subscription)
+        return {'url': url, 'messageHash': messageHash, 'message': request, 'subscribeHashes': [subscriptionHash], 'subscription': subscription, 'symbol': symbolResolved}
+
+    async def watch_my_trades(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Trade]:
+        """
+        watches information on multiple trades made by the user
+
+        https://bingx-api.github.io/docs-v3/#/en/Spot/Websocket%20Account%20Data/order%20update%20event
+        https://bingx-api.github.io/docs-v3/#/en/Swap/Websocket%20Account%20Data/Order%20update%20push
+        https://bingx-api.github.io/docs-v3/#/en/Coin-M%20Futures/Websocket%20Account%20Data/Order%20update%20push
+
+        :param str [symbol]: unified market symbol of the market the trades are made in
+        :param int [since]: the earliest time in ms to watch trades for
+        :param int [limit]: the maximum number of trade structures to retrieve
+        :param dict [params]: extra parameters specific to the exchange API endpoint
+        :returns dict[]: a list of `trade structures <https://docs.ccxt.com/?id=trade-structure>`
+        """
+        stream = await self.prepare_my_trades_subscription(symbol, params)
+        symbolResolved = stream['symbol']
+        messageHash = stream['messageHash']
+        trades = await self.watch(stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription'])
         limitResolved = limit
         queueHashes = self.safe_list(self.safe_dict(self.options, 'ws', {}), 'messageQueueHashes', [])
         if self.newUpdates and not self.in_array(messageHash, queueHashes):
@@ -1140,18 +1152,7 @@ class bingx(ccxt.async_support.bingx):
             future.resolve()
             client.resolve(self.balance[type], type + ':balance')
 
-    async def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Position]:
-        """
-        watch all open positions
-
-        https://bingx-api.github.io/docs/#/en-us/swapV2/socket/account.html#Account%20balance%20and%20position%20update%20push
-
-        :param str[]|None [symbols]: list of unified market symbols
-        :param int [since]: the earliest time in ms to fetch positions for
-        :param int [limit]: the maximum number of position structures to retrieve
-        :param dict [params]: extra parameters specific to the exchange API endpoint
-        :returns dict[]: a list of `position structure <https://docs.ccxt.com/en/latest/manual.html#position-structure>`
-        """
+    async def prepare_positions_subscription(self, symbols: Strings = None, params: dict = {}) -> dict:
         if self.markets is None:
             await self.load_markets()
         await self.authenticate()
@@ -1183,10 +1184,26 @@ class bingx(ccxt.async_support.bingx):
             'unsubscribe': False,
             'id': uuid,
         }
-        if fetchPositionsSnapshot and awaitPositionsSnapshot and self.positions is None:
-            snapshot = await client.future(type + ':fetchPositionsSnapshot')
+        return {'url': url, 'messageHash': messageHash, 'message': None, 'subscribeHashes': [subscriptionHash], 'subscription': subscription, 'symbols': symbolsNormalized, 'cache': self.positions, 'awaitSnapshot': (fetchPositionsSnapshot is True) and (awaitPositionsSnapshot is True) and (self.positions is None), 'snapshotHash': type + ':fetchPositionsSnapshot'}
+
+    async def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Position]:
+        """
+        watch all open positions
+
+        https://bingx-api.github.io/docs/#/en-us/swapV2/socket/account.html#Account%20balance%20and%20position%20update%20push
+
+        :param str[]|None [symbols]: list of unified market symbols
+        :param int [since]: the earliest time in ms to fetch positions for
+        :param int [limit]: the maximum number of position structures to retrieve
+        :param dict [params]: extra parameters specific to the exchange API endpoint
+        :returns dict[]: a list of `position structure <https://docs.ccxt.com/en/latest/manual.html#position-structure>`
+        """
+        stream = await self.prepare_positions_subscription(symbols, params)
+        symbolsNormalized = stream['symbols']
+        if stream['awaitSnapshot']:
+            snapshot = await self.client(stream['url']).future(stream['snapshotHash'])
             return self.filter_by_symbols_since_limit(snapshot, symbolsNormalized, since, limit, True)
-        newPositions = await self.watch(url, messageHash, None, subscriptionHash, subscription)
+        newPositions = await self.watch(stream['url'], stream['messageHash'], stream['message'], stream['subscribeHashes'][0], stream['subscription'])
         if self.newUpdates:
             return newPositions
         return self.filter_by_symbols_since_limit(self.positions, symbolsNormalized, since, limit, True)

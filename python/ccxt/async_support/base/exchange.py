@@ -22,7 +22,7 @@ from ccxt.async_support.base.throttler import Throttler
 
 # -----------------------------------------------------------------------------
 
-from ccxt.base.errors import BadSymbol, BadRequest, BadResponse, ExchangeClosedByUser, ExchangeError, ExchangeNotAvailable, RequestTimeout, NotSupported, NullResponse, InvalidAddress, RateLimitExceeded, OperationFailed
+from ccxt.base.errors import NetworkError, BadSymbol, BadRequest, BadResponse, ExchangeClosedByUser, ExchangeError, ExchangeNotAvailable, RequestTimeout, NotSupported, NullResponse, InvalidAddress, RateLimitExceeded, OperationFailed
 from ccxt.base.types import ConstructorArgs, OrderType, OrderSide, OrderRequest, CancellationRequest, Order
 
 # -----------------------------------------------------------------------------
@@ -336,7 +336,6 @@ class BaseExchange(SyncExchange):
             del self.options['cachedCurrencies']
         return self.set_markets(markets, currencies)
 
-
     async def load_markets(self, reload=False, params={}):
         """
         Loads and prepares the markets for trading.
@@ -468,99 +467,86 @@ class BaseExchange(SyncExchange):
     def handle_message(self, client, message):
         raise NotSupported(self.id + '.handle_message() not implemented yet')
 
-    def watch_multiple(self, url, message_hashes, message=None, subscribe_hashes=None, subscription=None):
-        # base exchange self.open starts the aiohttp Session in an async context
-        self.open()
-        backoff_delay = self.ws_dial_delay(url)
-        client = self.client(url)
-
-        future = Future.race([client.future(message_hash) for message_hash in message_hashes])
-
-        missing_subscriptions = []
-        if subscribe_hashes is not None:
-            for subscribe_hash in subscribe_hashes:
-                if subscribe_hash not in client.subscriptions:
-                    missing_subscriptions.append(subscribe_hash)
-                    client.subscriptions[subscribe_hash] = subscription or True
-
+    def _subscribe(self, url, client, message, subscribe_hashes, subscription):
+        missing = []
+        for subscribe_hash in subscribe_hashes or []:
+            if subscribe_hash not in client.subscriptions:
+                missing.append(subscribe_hash)
+                client.subscriptions[subscribe_hash] = subscription or True
         selected_session = self.session
-        # http/s proxy is being set in other places
-        httpProxy, httpsProxy, socksProxy = self.check_ws_proxy_settings()
-        if (socksProxy):
-            selected_session = self.get_socks_proxy_session(socksProxy)
-        connected = client.connected if client.connected.done() \
-            else asyncio.ensure_future(client.connect(selected_session, backoff_delay))
-
-        def after(fut):
-            if fut.cancelled() or fut.exception() is not None or client.retired or self.clients.get(url) is not client:
-                return
-            # todo: decouple signing from subscriptions
-            options = self.safe_value(self.options, 'ws')
-            cost = self.safe_value(options, 'cost', 1)
-            if message:
-                async def send_message():
+        http_proxy, https_proxy, socks_proxy = self.check_ws_proxy_settings()
+        if socks_proxy:
+            selected_session = self.get_socks_proxy_session(socks_proxy)
+        connected = client.connected if client.connected.done() else client.connect(selected_session, self.ws_dial_delay(url))
+        if missing and message:
+            async def send_subscription():
+                try:
+                    await asyncio.shield(connected)
+                    if client.retired or self.clients.get(url) is not client:
+                        raise client.error or NetworkError('WebSocket subscription client is closed')
+                    cost = self.safe_value(self.safe_value(self.options, 'ws'), 'cost', 1)
                     if self.enableRateLimit:
                         await client.throttle(cost)
                     if client.retired or self.clients.get(url) is not client:
-                        return
-                    try:
-                        await client.send(message)
-                    except ConnectionError as e:
-                        client.on_error(e)
-                    except Exception as e:
-                        client.on_error(e)
-                asyncio.ensure_future(send_message())
+                        raise client.error or NetworkError('WebSocket subscription client is closed')
+                    await client.send(message)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    client.on_error(error)
+                    raise
 
-        if missing_subscriptions:
-            connected.add_done_callback(after)
+            task = asyncio.ensure_future(send_subscription())
+            client.pending_subscription_tasks.add(task)
+            for subscribe_hash in missing:
+                client.subscription_tasks[subscribe_hash] = task
 
+            def settled(completed):
+                client.pending_subscription_tasks.discard(completed)
+                for subscribe_hash in missing:
+                    if client.subscription_tasks.get(subscribe_hash) is completed:
+                        del client.subscription_tasks[subscribe_hash]
+                if not completed.cancelled():
+                    completed.exception()
+            task.add_done_callback(settled)
+        pending = {client.subscription_tasks[subscribe_hash] for subscribe_hash in subscribe_hashes or []
+                   if subscribe_hash in client.subscription_tasks}
+        return connected, pending
+
+    async def start_subscription(self, url, message=None, subscribe_hashes=None, subscription=None):
+        self.open()
+        client = self.client(url)
+        connected, pending = self._subscribe(url, client, message, subscribe_hashes, subscription)
+        await asyncio.shield(connected)
+        if pending:
+            await asyncio.wait(pending)
+            for task in pending:
+                if task.cancelled():
+                    if client.retired:
+                        raise client.error or NetworkError('WebSocket subscription is interrupted')
+                    raise asyncio.CancelledError
+                task.result()
+        if client.retired or self.clients.get(url) is not client:
+            raise client.error or NetworkError('WebSocket subscription client is closed')
+        if client.messageQueueError is not None:
+            raise client.messageQueueError
+
+    def watch_multiple(self, url, message_hashes, message=None, subscribe_hashes=None, subscription=None):
+        self.open()
+        client = self.client(url)
+        future = Future.race([client.future(message_hash) for message_hash in message_hashes])
+        self._subscribe(url, client, message, subscribe_hashes, subscription)
         return future
 
     def watch(self, url, message_hash, message=None, subscribe_hash=None, subscription=None):
-        # base exchange self.open starts the aiohttp Session in an async context
         self.open()
-        backoff_delay = self.ws_dial_delay(url)
         client = self.client(url)
         if subscribe_hash is None and message_hash in client.futures:
             return client.futures[message_hash]
         future = client.future(message_hash)
-
-        subscribed = client.subscriptions.get(subscribe_hash)
-
-        if not subscribed:
-            client.subscriptions[subscribe_hash] = subscription or True
-
-        selected_session = self.session
-        # http/s proxy is being set in other places
-        httpProxy, httpsProxy, socksProxy = self.check_ws_proxy_settings()
-        if (socksProxy):
-            selected_session = self.get_socks_proxy_session(socksProxy)
-        connected = client.connected if client.connected.done() \
-            else asyncio.ensure_future(client.connect(selected_session, backoff_delay))
-
-        def after(fut):
-            if fut.cancelled() or fut.exception() is not None or client.retired or self.clients.get(url) is not client:
-                return
-            # todo: decouple signing from subscriptions
-            options = self.safe_value(self.options, 'ws')
-            cost = self.safe_value(options, 'cost', 1)
-            if message:
-                async def send_message():
-                    if self.enableRateLimit:
-                        await client.throttle(cost)
-                    if client.retired or self.clients.get(url) is not client:
-                        return
-                    try:
-                        await client.send(message)
-                    except ConnectionError as e:
-                        client.on_error(e)
-                    except Exception as e:
-                        client.on_error(e)
-                asyncio.ensure_future(send_message())
-
-        if not subscribed:
-            connected.add_done_callback(after)
-
+        if not client.subscriptions.get(subscribe_hash):
+            client.subscriptions.pop(subscribe_hash, None)
+        self._subscribe(url, client, message, [subscribe_hash], subscription)
         return future
 
     def on_connected(self, client, message=None):
@@ -2222,6 +2208,27 @@ class Exchange(BaseExchange):
 
     async def fetch_position(self, symbol: str, params: dict = {}):
         raise NotSupported(self.id + ' fetchPosition() is not supported yet')
+
+    async def prepare_orders_subscription(self, symbol: Str = None, params: dict = {}):
+        raise NotSupported(self.id + ' startOrders() is not supported')
+
+    async def start_orders(self, symbol: Str = None, params: dict = {}):
+        stream = await self.prepareOrdersSubscription(symbol, params)
+        return await self.start_subscription(stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription'])
+
+    async def prepare_my_trades_subscription(self, symbol: Str = None, params: dict = {}):
+        raise NotSupported(self.id + ' startMyTrades() is not supported')
+
+    async def start_my_trades(self, symbol: Str = None, params: dict = {}):
+        stream = await self.prepareMyTradesSubscription(symbol, params)
+        return await self.start_subscription(stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription'])
+
+    async def prepare_positions_subscription(self, symbols: Strings = None, params: dict = {}):
+        raise NotSupported(self.id + ' startPositions() is not supported')
+
+    async def start_positions(self, symbols: Strings = None, params: dict = {}):
+        stream = await self.preparePositionsSubscription(symbols, params)
+        return await self.start_subscription(stream['url'], stream['message'], stream['subscribeHashes'], stream['subscription'])
 
     async def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params: dict = {}):
         raise NotSupported(self.id + ' watchPositions() is not supported yet')

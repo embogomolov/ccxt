@@ -98,6 +98,8 @@ class Client(object):
             self.options = config
         self.connected = Future()
         self.open_task = None
+        self.subscription_tasks = {}
+        self.pending_subscription_tasks = set()
         self.retired = False
         # a rejected connection future may end up with no awaiter, e.g. on
         # already-subscribed watch paths or abandoned dials, retrieving the
@@ -386,6 +388,9 @@ class Client(object):
         self.connected.reject(error or NetworkError('WebSocket client is closed'))
         if self.open_task is not None and self.open_task is not current_task() and not self.open_task.done():
             self.open_task.cancel()
+        for task in self.pending_subscription_tasks:
+            if task is not current_task() and not task.done():
+                task.cancel()
 
     def connect(self, session, backoff_delay=0):
         if not self.retired and not self.connection and not self.connecting:
@@ -515,8 +520,11 @@ class Client(object):
     async def aiohttp_close(self):
         self._retire(self.error)
         interrupted = False
+        pending = [task for task in self.pending_subscription_tasks if task is not current_task()]
         if self.open_task is not None and self.open_task is not current_task():
-            completion = gather(self.open_task, return_exceptions=True)
+            pending.append(self.open_task)
+        if pending:
+            completion = gather(*pending, return_exceptions=True)
             while not completion.done():
                 try:
                     await shield(completion)

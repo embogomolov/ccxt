@@ -901,6 +901,7 @@ export default class binance extends binanceRest {
      * @returns {object[]} a list of [order structures]{@link https://docs.ccxt.com/?id=order-structure}
      */
     fetchOpenOrdersWs(symbol?: Str, since?: Int, limit?: Int, params?: Dict): Promise<Order[]>;
+    prepareOrdersSubscription(symbol?: Str, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name binance#watchOrders
@@ -927,6 +928,7 @@ export default class binance extends binanceRest {
     handleStockPrice(client: Client, message: Dict): void;
     handleStockQuote(client: Client, message: Dict): void;
     handleOptionsOrderUpdate(client: Client, message: Dict): void;
+    preparePositionsSubscription(symbols?: Strings, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name binance#watchPositions
@@ -974,6 +976,7 @@ export default class binance extends binanceRest {
      */
     fetchTradesWs(symbol: string, since?: Int, limit?: Int, params?: Dict): Promise<Trade[]>;
     handleTradesWs(client: Client, message: Dict): void;
+    prepareMyTradesSubscription(symbol?: Str, params?: Dict): Promise<Dict>;
     /**
      * @method
      * @name binance#watchMyTrades

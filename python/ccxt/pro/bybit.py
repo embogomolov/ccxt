@@ -1237,21 +1237,7 @@ class bybit(ccxt.async_support.bybit):
         else:
             return 'usdc'
 
-    async def watch_my_trades(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Trade]:
-        """
-        watches information on multiple trades made by the user
-
-        https://bybit-exchange.github.io/docs/v5/websocket/private/execution
-        https://bybit-exchange.github.io/docs/v5/websocket/private/fast-execution
-
-        :param str symbol: unified market symbol of the market orders were made in
-        :param int [since]: the earliest time in ms to fetch orders for
-        :param int [limit]: the maximum number of order structures to retrieve
-        :param dict [params]: extra parameters specific to the exchange API endpoint
-        :param boolean [params.unifiedMargin]: use unified margin account
-        :param boolean [params.executionFast]: use fast execution
-        :returns dict[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
-        """
+    async def prepare_my_trades_subscription(self, symbol: Str = None, params: dict = {}) -> dict:
         method = 'watchMyTrades'
         messageHash = 'myTrades'
         if self.markets is None:
@@ -1270,7 +1256,26 @@ class bybit(ccxt.async_support.bybit):
         executionFast, paramsExecutionFast = self.handle_option_bool_and_params(params, 'watchMyTrades', 'executionFast', False)
         if executionFast:
             topic = 'execution.fast'
-        trades = await self.watch_topics(url, [messageHash], [topic], paramsExecutionFast)
+        return self.extend(self.prepare_topics(url, [messageHash], [topic], paramsExecutionFast), {'symbol': symbolResolved})
+
+    async def watch_my_trades(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Trade]:
+        """
+        watches information on multiple trades made by the user
+
+        https://bybit-exchange.github.io/docs/v5/websocket/private/execution
+        https://bybit-exchange.github.io/docs/v5/websocket/private/fast-execution
+
+        :param str symbol: unified market symbol of the market orders were made in
+        :param int [since]: the earliest time in ms to fetch orders for
+        :param int [limit]: the maximum number of order structures to retrieve
+        :param dict [params]: extra parameters specific to the exchange API endpoint
+        :param boolean [params.unifiedMargin]: use unified margin account
+        :param boolean [params.executionFast]: use fast execution
+        :returns dict[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
+        """
+        stream = await self.prepare_my_trades_subscription(symbol, params)
+        symbolResolved = stream['symbol']
+        trades = await self.watch_multiple(stream['url'], stream['messageHashes'], stream['message'], stream['subscribeHashes'], stream['subscription'])
         limitResolved = limit
         if self.newUpdates:
             limitResolved = trades.getLimit(symbolResolved, limit)
@@ -1448,18 +1453,7 @@ class bybit(ccxt.async_support.bybit):
         messageHash = 'myTrades'
         client.resolve(currentTrades, messageHash)
 
-    async def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Position]:
-        """
-
-        https://bybit-exchange.github.io/docs/v5/websocket/private/position
-
-        watch all open positions
-        :param str[] [symbols]: list of unified market symbols
-        :param int [since]: the earliest time in ms to fetch positions for
-        :param int [limit]: the maximum number of positions to retrieve
-        :param dict params: extra parameters specific to the exchange API endpoint
-        :returns dict[]: a list of `position structure <https://docs.ccxt.com/en/latest/manual.html#position-structure>`
-        """
+    async def prepare_positions_subscription(self, symbols: Strings = None, params: dict = {}) -> dict:
         if self.markets is None:
             await self.load_markets()
         method = 'watchPositions'
@@ -1478,11 +1472,27 @@ class bybit(ccxt.async_support.bybit):
         cache = self.positions
         fetchPositionsSnapshot = self.handle_option('watchPositions', 'fetchPositionsSnapshot', True)
         awaitPositionsSnapshot = self.handle_option('watchPositions', 'awaitPositionsSnapshot', True)
-        if (fetchPositionsSnapshot is True) and (awaitPositionsSnapshot is True) and (cache is None):
-            snapshot = await client.future('fetchPositionsSnapshot')
+        return self.extend(self.prepare_topics(url, [messageHash], ['position'], params), {'symbols': symbolsNormalized, 'cache': cache, 'awaitSnapshot': (fetchPositionsSnapshot is True) and (awaitPositionsSnapshot is True) and (cache is None), 'snapshotHash': 'fetchPositionsSnapshot'})
+
+    async def watch_positions(self, symbols: Strings = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Position]:
+        """
+
+        https://bybit-exchange.github.io/docs/v5/websocket/private/position
+
+        watch all open positions
+        :param str[] [symbols]: list of unified market symbols
+        :param int [since]: the earliest time in ms to fetch positions for
+        :param int [limit]: the maximum number of positions to retrieve
+        :param dict params: extra parameters specific to the exchange API endpoint
+        :returns dict[]: a list of `position structure <https://docs.ccxt.com/en/latest/manual.html#position-structure>`
+        """
+        stream = await self.prepare_positions_subscription(symbols, params)
+        symbolsNormalized = stream['symbols']
+        cache = stream['cache']
+        if stream['awaitSnapshot']:
+            snapshot = await self.client(stream['url']).future(stream['snapshotHash'])
             return self.filter_by_symbols_since_limit(snapshot, symbolsNormalized, since, limit, True)
-        topics = ['position']
-        newPositions = await self.watch_topics(url, [messageHash], topics, params)
+        newPositions = await self.watch_multiple(stream['url'], stream['messageHashes'], stream['message'], stream['subscribeHashes'], stream['subscription'])
         if self.newUpdates:
             return newPositions
         return self.filter_by_symbols_since_limit(cache, symbolsNormalized, since, limit, True)
@@ -1742,18 +1752,7 @@ class bybit(ccxt.async_support.bybit):
             'datetime': self.iso8601(timestamp),
         })
 
-    async def watch_orders(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Order]:
-        """
-        watches information on multiple orders made by the user
-
-        https://bybit-exchange.github.io/docs/v5/websocket/private/order
-
-        :param str symbol: unified market symbol of the market orders were made in
-        :param int [since]: the earliest time in ms to fetch orders for
-        :param int [limit]: the maximum number of order structures to retrieve
-        :param dict [params]: extra parameters specific to the exchange API endpoint
-        :returns dict[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
-        """
+    async def prepare_orders_subscription(self, symbol: Str = None, params: dict = {}) -> dict:
         if self.markets is None:
             await self.load_markets()
         method = 'watchOrders'
@@ -1769,7 +1768,23 @@ class bybit(ccxt.async_support.bybit):
             'usdc': ['user.openapi.perp.order'],
         }
         topics = self.safe_list(topicsByMarket, self.get_private_type(url))
-        orders = await self.watch_topics(url, [messageHash], topics, params)
+        return self.extend(self.prepare_topics(url, [messageHash], topics, params), {'symbol': symbolResolved})
+
+    async def watch_orders(self, symbol: Str = None, since: Int = None, limit: Int = None, params: dict = {}) -> list[Order]:
+        """
+        watches information on multiple orders made by the user
+
+        https://bybit-exchange.github.io/docs/v5/websocket/private/order
+
+        :param str symbol: unified market symbol of the market orders were made in
+        :param int [since]: the earliest time in ms to fetch orders for
+        :param int [limit]: the maximum number of order structures to retrieve
+        :param dict [params]: extra parameters specific to the exchange API endpoint
+        :returns dict[]: a list of `order structures <https://docs.ccxt.com/?id=order-structure>`
+        """
+        stream = await self.prepare_orders_subscription(symbol, params)
+        symbolResolved = stream['symbol']
+        orders = await self.watch_multiple(stream['url'], stream['messageHashes'], stream['message'], stream['subscribeHashes'], stream['subscription'])
         limitResolved = limit
         if self.newUpdates:
             limitResolved = orders.getLimit(symbolResolved, limit)
@@ -2232,7 +2247,7 @@ class bybit(ccxt.async_support.bybit):
             if code is not None:
                 self.balance[code] = account
 
-    async def watch_topics(self, url: str, messageHashes: list[str], topics: object, params: dict = {}):
+    def prepare_topics(self, url: str, messageHashes: list[str], topics: object, params: dict = {}):
         client = self.client(url)
         newTopics = []
         topicsLength = len(topics)
@@ -2273,7 +2288,11 @@ class bybit(ccxt.async_support.bybit):
                 'id': self.safe_string(message, 'req_id'),
                 'topics': newTopics,
             }
-        return await self.watch_multiple(url, messageHashes, message, messageHashes, subscription)
+        return {'url': url, 'messageHashes': messageHashes, 'message': message, 'subscribeHashes': messageHashes, 'subscription': subscription}
+
+    async def watch_topics(self, url: str, messageHashes: list[str], topics: object, params: dict = {}):
+        stream = self.prepare_topics(url, messageHashes, topics, params)
+        return await self.watch_multiple(stream['url'], stream['messageHashes'], stream['message'], stream['subscribeHashes'], stream['subscription'])
 
     async def un_watch_topics(self, url: str, topic: str, symbols: Strings, messageHashes: list[str], subMessageHashes: list[str], topics: object, params: dict = {}, subExtension: dict = {}):
         reqId = self.request_id()
